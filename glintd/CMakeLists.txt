@@ -32,7 +32,8 @@ if(WIN32)
 else()
     set(PLATFORM_SOURCES
             src/linux/capture_linux_stub.cpp
-            src/linux/ipc_server_pipe_unix.cpp)
+            src/linux/ipc_server_pipe_unix.cpp
+            src/common/constants.h)
     add_definitions(-DGLINT_LINUX)
 endif()
 

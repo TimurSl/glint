@@ -48,7 +48,7 @@ void IpcServerPipe::stop() {
 
 void IpcServerPipe::run(IpcHandler handler) {
     auto& log = Logger::instance();
-        // Construct pipe name from endpoint_
+
     std::wstring endpointW(endpoint_.begin(), endpoint_.end());
     std::wstring pipeName = L"\\\\.\\pipe\\" + endpointW;
 
@@ -61,28 +61,40 @@ void IpcServerPipe::run(IpcHandler handler) {
             4096, 4096,
             0,
             nullptr);
+
         if (hPipe == INVALID_HANDLE_VALUE) {
-            log.error("CreateNamedPipe failed");
-            return;
+            log.error("CreateNamedPipe failed: " + std::to_string(GetLastError()));
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            continue;
         }
 
         log.info("IPC: waiting client...");
+
         BOOL ok = ConnectNamedPipe(hPipe, nullptr) ? TRUE :
                   (GetLastError() == ERROR_PIPE_CONNECTED);
+
         if (!ok) {
             CloseHandle(hPipe);
             if (!running_) break;
             continue;
         }
+
         log.info("IPC: client connected");
 
         while (running_) {
             std::string req;
-            if (!readLine(hPipe, req)) break;
+            if (!readLine(hPipe, req))
+                break;
+
             std::string rsp;
-            try { rsp = handler(req); }
-            catch (...) { rsp = "{\"ok\":false,\"error\":\"exception\"}"; }
-            if (!writeLine(hPipe, rsp)) break;
+            try {
+                rsp = handler(req);
+            } catch (...) {
+                rsp = "{\"ok\":false,\"error\":\"exception\"}";
+            }
+
+            if (!writeLine(hPipe, rsp))
+                break;
         }
 
         DisconnectNamedPipe(hPipe);

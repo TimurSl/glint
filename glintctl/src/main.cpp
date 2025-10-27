@@ -1,4 +1,4 @@
-﻿// glintctl/glintctl.cpp
+﻿// glintctl/main.cpp
 #include <iostream>
 #include <string>
 #include <vector>

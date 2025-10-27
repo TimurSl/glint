@@ -2,11 +2,16 @@
 project(glintctl LANGUAGES CXX)
 
 add_executable(glintctl
-        src/glintctl.cpp
+        src/main.cpp
+        src/common/endpoint.cpp
+        src/common/json_builder.cpp
 )
 
-target_compile_features(glintctl PRIVATE cxx_std_17)
-
-if (MSVC)
-    target_compile_definitions(glintctl PRIVATE _WIN32_WINNT=0x0601)
+if(WIN32)
+    target_sources(glintctl PRIVATE src/windows/transport_win.cpp)
+else()
+    target_sources(glintctl PRIVATE src/linux/transport_unix.cpp)
 endif()
+
+target_include_directories(glintctl PRIVATE src)
+target_compile_features(glintctl PRIVATE cxx_std_17)

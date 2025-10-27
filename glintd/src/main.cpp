@@ -11,6 +11,7 @@
 #include <thread>
 #include <sstream>
 
+#include "constants.h"
 #include "rpc/handlers.h"
 
 #if defined(GLINT_WINDOWS)
@@ -19,19 +20,41 @@ extern "C" CaptureBase* create_capture();
 extern "C" CaptureBase* create_capture();
 #endif
 
-int main() {
+int main(int argc, char** argv) {
     auto& log = Logger::instance();
     Config cfg = load_default_config();
+
+    std::string socket_path;
+    bool force_reset = false;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--socket" && i + 1 < argc)
+            socket_path = argv[++i];
+        else if (arg == "--reset")
+            force_reset = true;
+        else if (arg == "--help" || arg == "-h") {
+            std::cout << "Usage: glintd [--socket <path>] [--reset]\n";
+            return 0;
+        }
+    }
+
+#ifdef _WIN32
+    if (socket_path.empty())
+        socket_path = glintd::consts::DEFAULT_PIPE_PATH;
+#else
+    if (socket_path.empty())
+        socket_path = glintd::consts::default_socket_path();
+#endif
+
+    Logger::instance().info("Using socket: " + socket_path);
+    log.info("Glint Daemon starting...");
 
     std::unique_ptr<CaptureBase> capture(create_capture());
     ReplayBuffer replay;
     MarkerManager markers;
     Detector detector;
-#if defined(GLINT_WINDOWS)
-    IpcServerPipe ipc("\\\\.\\pipe\\glintd");
-#else
-    IpcServerPipe ipc("/run/user/" + std::to_string(getuid()) + "/glintd.sock");
-#endif
+    IpcServerPipe ipc(socket_path);
 
     if (!capture->init()) {
         log.error("Capture init failed");
@@ -48,7 +71,7 @@ int main() {
             capture->stop();
             replay.stop_session();
 
-            replay.export_last_clip("export_last_clip.txt");
+            replay.export_last_clip(glintd::consts::EXPORT_LAST_CLIP);
         }
     );
 
@@ -59,6 +82,8 @@ int main() {
 
     ipc.start(handler);
 
+    log.info("Glint Daemon started with PID " + std::to_string(::getpid()));
+    log.info("IPC server is running on " + socket_path);
 
     while (true) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
