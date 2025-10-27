@@ -10,18 +10,18 @@
 
 ## M1 — Real IPC (Named Pipe / UDS) + clipdebugui
 
-* [ ] Implement `IpcServerPipe`
+* [X] Implement `IpcServerPipe`
 
-    * [ ] Windows: Named Pipe `\\.\pipe\glintd`
-    * [ ] Linux: Unix Domain Socket `/run/user/$UID/glintd.sock`
-* [ ] JSON request/response over line-delimited frames
+    * [x] Windows: Named Pipe `\\.\pipe\glintd`
+    * [x] Linux: Unix Domain Socket `/run/user/$UID/glintd.sock`
+* [x] JSON request/response over line-delimited frames
 
-    * [ ] `{"cmd":"status"}`
-    * [ ] `{"cmd":"start"} / {"cmd":"stop"}`
-    * [ ] `{"cmd":"marker","pre":20,"post":10}`
-    * [ ] `{"cmd":"export","mode":"last"}`
+    * [x] `{"cmd":"status"}`
+    * [x] `{"cmd":"start"} / {"cmd":"stop"}`
+    * [x] `{"cmd":"marker","pre":20,"post":10}`
+    * [x] `{"cmd":"export","mode":"last"}`
 * [ ] `clipdebugui` (Qt Widgets): grid of buttons, log pane
-* [ ] Robustness: reconnects, no crashes on client drop
+* [x] Robustness: reconnects, no crashes on client drop
 
 ---
 
