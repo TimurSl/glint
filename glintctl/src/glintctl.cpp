@@ -41,7 +41,7 @@ static void usage(const char *prog) {
             "\n"
             "Defaults:\n"
             "  Windows pipe: \\\\.\\pipe\\glintd\n"
-            "  Linux  socket: $XDG_RUNTIME_DIR/glintd.sock или /run/user/$UID/glintd.sock\n";
+                        "  Linux  socket: $XDG_RUNTIME_DIR/glintd.sock or /run/user/$UID/glintd.sock\n";
 }
 
 #ifdef _WIN32

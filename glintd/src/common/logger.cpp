@@ -7,7 +7,7 @@ Logger& Logger::instance() {
 
 void Logger::log(const std::string &msg, const std::string &level) {
     std::lock_guard<std::mutex> lock(mtx_);
-    std::cout << "["+ level +"] " << msg << std::endl;
+        std::cout << "[" << level << "] " << msg << std::endl;
 }
 
 void Logger::info(const std::string& msg) {

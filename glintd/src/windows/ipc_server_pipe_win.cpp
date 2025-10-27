@@ -15,7 +15,7 @@ static bool readLine(HANDLE h, std::string& out) {
             return false;
         }
         if (read == 0) return false;
-        acc.append(buf, buf + read);
+                acc.append(buf, read);
         auto pos = acc.find('\n');
         if (pos != std::string::npos) {
             out.assign(acc.data(), pos);
@@ -48,14 +48,16 @@ void IpcServerPipe::stop() {
 
 void IpcServerPipe::run(IpcHandler handler) {
     auto& log = Logger::instance();
-    const std::wstring pipeName = L"\\\\.\\pipe\\glintd";
+        // Construct pipe name from endpoint_
+    std::wstring endpointW(endpoint_.begin(), endpoint_.end());
+    std::wstring pipeName = L"\\\\.\\pipe\\" + endpointW;
 
     while (running_) {
         HANDLE hPipe = CreateNamedPipeW(
             pipeName.c_str(),
             PIPE_ACCESS_DUPLEX,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-            1,
+            PIPE_UNLIMITED_INSTANCES,
             4096, 4096,
             0,
             nullptr);

@@ -77,7 +77,10 @@ void IpcServerPipe::run(IpcHandler handler) {
 
     while (running_) {
         int cfd = ::accept(sfd, nullptr, nullptr);
-        if (cfd < 0) { if (!running_) break; continue;}
+                if (cfd < 0) {
+            if (!running_) break;
+            continue;
+        }
         log.info("IPC: client connected");
 
         while (running_) {
