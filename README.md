@@ -79,13 +79,10 @@
 
 ---
 
-## M6 — Hotkeys + “ding” that’s not recorded
+## M6 — Hotkeys + “ding” 
 
 * [ ] Global hotkeys via **libuiohook**
-* [ ] Play “ding” on a non-captured device
-
-    * [ ] Windows: choose capture device for loopback; play ding on another
-    * [ ] Linux: PipeWire separate sink for UI
+* [ ] Play “ding
 * [ ] IPC/Hotkey: `add_marker` writes to DB
 
 ---
@@ -156,4 +153,6 @@
 * [ ] `cliphttpd` (HTTP/WebSocket) with pairing/tokens
 * [ ] Multi-marker clip stitching
 * [ ] Stream Deck integration
-* [ ] ML “moment” detection (kills/goals etc.)
+* [ ] ML “moment” detection (kills/goals etc.) (maybe never cuz anticheats and stuff, too complex, can be separate project)
+* [ ] GPU selection (NVENC/VAAPI device) (must have but later)
+* [ ] Overlay OSD (status, countdown)
