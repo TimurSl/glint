@@ -5,10 +5,13 @@
 #include "common/marker_manager.h"
 #include "common/ipc_server_stdin.h"
 #include "common/detector.h"
+#include "common/ipc_server_pipe.h"
 
 #include <chrono>
 #include <thread>
 #include <sstream>
+
+#include "rpc/handlers.h"
 
 #if defined(GLINT_WINDOWS)
 extern "C" CaptureBase* create_capture();
@@ -24,7 +27,11 @@ int main() {
     ReplayBuffer replay;
     MarkerManager markers;
     Detector detector;
-    StdinIpcServer ipc;
+#if defined(GLINT_WINDOWS)
+    IpcServerPipe ipc("\\\\.\\pipe\\glintd");
+#else
+    IpcServerPipe ipc("/run/user/" + std::to_string(getuid()) + "/glintd.sock");
+#endif
 
     if (!capture->init()) {
         log.error("Capture init failed");
@@ -45,39 +52,9 @@ int main() {
         }
     );
 
-    auto handler = [&](const std::string& line)->std::string {
-        std::istringstream iss(line);
-        std::string cmd;
-        iss >> cmd;
 
-        if (cmd == "status") {
-            return replay.is_running() ? "status: recording" : "status: idle";
-        }
-        if (cmd == "start") {
-            capture->start();
-            replay.start_session("Manual");
-            return "ok";
-        }
-        if (cmd == "stop") {
-            capture->stop();
-            replay.stop_session();
-            return "ok";
-        }
-        if (cmd == "marker") {
-            double pre = cfg.pre_seconds, post = cfg.post_seconds;
-            iss >> pre >> post;
-            Marker m{ static_cast<std::uint64_t>(
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now().time_since_epoch()).count()
-            ), pre, post };
-            markers.add(m);
-            return "marker: ok";
-        }
-        if (cmd == "export") {
-            replay.export_last_clip("export_manual.txt");
-            return "export: ok";
-        }
-        return "unknown command";
+    auto handler = [&](const std::string& line) -> std::string {
+        return glintd::rpc::handle_command(line);
     };
 
     ipc.start(handler);

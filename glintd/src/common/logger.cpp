@@ -5,12 +5,15 @@ Logger& Logger::instance() {
     return inst;
 }
 
-void Logger::info(const std::string& msg) {
+void Logger::log(const std::string &msg, const std::string &level) {
     std::lock_guard<std::mutex> lock(mtx_);
-    std::cout << "[INFO] " << msg << std::endl;
+    std::cout << "["+ level +"] " << msg << std::endl;
+}
+
+void Logger::info(const std::string& msg) {
+    log(msg, "INFO");
 }
 
 void Logger::error(const std::string& msg) {
-    std::lock_guard<std::mutex> lock(mtx_);
-    std::cerr << "[ERROR] " << msg << std::endl;
+    log(msg, "ERROR");
 }
