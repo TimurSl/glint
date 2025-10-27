@@ -2,6 +2,8 @@
 #include <string>
 
 namespace glintd::consts {
+    inline constexpr const char* VERSION = "0.1.0-dev";
+    inline constexpr const char* LOG_FILE = "glintd.log";
 
     // Название пайпа/сокета по умолчанию
 #ifdef _WIN32

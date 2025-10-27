@@ -50,7 +50,13 @@ void IpcServerPipe::run(IpcHandler handler) {
     auto& log = Logger::instance();
 
     std::wstring endpointW(endpoint_.begin(), endpoint_.end());
-    std::wstring pipeName = L"\\\\.\\pipe\\" + endpointW;
+    std::wstring pipeName;
+    if (endpoint_.rfind(R"(\\.\pipe\)", 0) == 0) {
+        pipeName.assign(endpoint_.begin(), endpoint_.end());
+    } else {
+        std::wstring endpointW(endpoint_.begin(), endpoint_.end());
+        pipeName = L"\\\\.\\pipe\\" + endpointW;
+    }
 
     while (running_) {
         HANDLE hPipe = CreateNamedPipeW(

@@ -47,7 +47,8 @@ int main(int argc, char** argv) {
         socket_path = glintd::consts::default_socket_path();
 #endif
 
-    Logger::instance().info("Using socket: " + socket_path);
+    log.to_file(glintd::consts::LOG_FILE);
+    log.info("Logging to file: " + std::string(glintd::consts::LOG_FILE));
     log.info("Glint Daemon starting...");
 
     std::unique_ptr<CaptureBase> capture(create_capture());
