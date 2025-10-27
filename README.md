@@ -27,14 +27,14 @@
 
 ## M2 — SQLite sessions & markers
 
-* [ ] Add SQLite DB file (Win: `%LOCALAPPDATA%\glint\glintd.db`, Linux: `~/.local/share/glint/glintd.db`)
-* [ ] Schema
+* [x] Add SQLite DB file (Win: `%LOCALAPPDATA%\glint\glintd.db`, Linux: `~/.local/share/glint/glintd.db`)
+* [x] Schema
 
-    * [ ] `sessions(id, game, started_at, stopped_at, container, output_mp4)`
-    * [ ] `markers(id, session_id, ts_ms, pre, post)`
-    * [ ] `chunks(id, session_id, path, start_ms, end_ms, keyframe_ms)`
-* [ ] Migrate `MarkerManager` to SQLite
-* [ ] IPC: basic list queries (optional now)
+    * [x] `sessions(id, game, started_at, stopped_at, container, output_mp4)`
+    * [x] `markers(id, session_id, ts_ms, pre, post)`
+    * [x] `chunks(id, session_id, path, start_ms, end_ms, keyframe_ms)`
+* [x] Migrate `MarkerManager` to SQLite
+* [x] IPC: basic list queries (optional now)
 
 ---
 

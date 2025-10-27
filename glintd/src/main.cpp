@@ -12,6 +12,7 @@
 #include <sstream>
 
 #include "constants.h"
+#include "db.h"
 #include "rpc/handlers.h"
 
 #if defined(GLINT_WINDOWS)
@@ -51,6 +52,7 @@ int main(int argc, char** argv) {
     log.info("Logging to file: " + std::string(glintd::consts::LOG_FILE));
     log.info("Glint Daemon starting...");
 
+    DB::instance().open();
     std::unique_ptr<CaptureBase> capture(create_capture());
     ReplayBuffer replay;
     MarkerManager markers;

@@ -1,5 +1,5 @@
 ﻿cmake_minimum_required(VERSION 3.21)
-project(glintd LANGUAGES CXX)
+project(glintd LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,6 +22,8 @@ set(COMMON_SOURCES
         src/common/ipc_server_pipe.h
         src/rpc/handlers.cpp
         src/rpc/handlers.h
+        src/common/db.cpp
+        src/common/db.h
 )
 
 if(WIN32)
@@ -42,6 +44,9 @@ add_executable(glintd
         ${COMMON_SOURCES}
         ${PLATFORM_SOURCES}
 )
+add_library(sqlite3 STATIC include/sqlite/sqlite3.c)
+target_include_directories(sqlite3 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include/sqlite)
+target_link_libraries(glintd PRIVATE sqlite3)
 
 target_include_directories(glintd PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src

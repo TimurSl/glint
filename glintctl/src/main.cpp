@@ -69,6 +69,8 @@ static std::string build_json(const std::vector<std::string> &args) {
     if (cmd == "status") return R"({"cmd":"status"})";
     if (cmd == "start") return R"({"cmd":"start"})";
     if (cmd == "stop") return R"({"cmd":"stop"})";
+    if (cmd == "quit") return R"({"cmd":"quit"})";
+    if (cmd == "list_sessions") return R"({"cmd":"list_sessions"})";
     if (cmd == "marker") {
         const char *pre = flag("--pre"), *post = flag("--post");
         if (!pre || !post) return {};

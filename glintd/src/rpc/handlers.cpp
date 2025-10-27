@@ -4,6 +4,9 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 
+#include "db.h"
+#include "sqlite3.h"
+
 using nlohmann::json;
 
 namespace glintd::rpc {
@@ -60,9 +63,35 @@ namespace glintd::rpc {
             else if (name == "quit") {
                 log.info("Quit requested by client");
                 resp = {{"ok", true}, {"msg", "shutting down"}};
-                // Возврат с пометкой, чтобы сервер мог завершиться
                 return resp.dump() + "\nQUIT\n";
             }
+            else if (name == "list_sessions") {
+                log.info("Listing last 50 sessions");
+                sqlite3* db = DB::instance().handle();
+                sqlite3_stmt* stmt;
+                sqlite3_prepare_v2(db,
+                    "SELECT id, game, started_at, stopped_at, container, output_mp4 FROM sessions ORDER BY id DESC LIMIT 50",
+                    -1, &stmt, nullptr);
+
+                nlohmann::json arr = nlohmann::json::array();
+                while (sqlite3_step(stmt) == SQLITE_ROW) {
+                    nlohmann::json obj;
+                    obj["id"] = sqlite3_column_int(stmt, 0);
+                    obj["game"] = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+                    obj["started_at"] = sqlite3_column_int(stmt, 2);
+                    obj["stopped_at"] = sqlite3_column_int(stmt, 3);
+                    obj["container"] = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
+                    obj["output_mp4"] = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5));
+                    arr.push_back(obj);
+                }
+                sqlite3_finalize(stmt);
+
+                nlohmann::json result;
+                result["ok"] = true;
+                result["sessions"] = arr;
+                return result.dump();
+            }
+
             else {
                 resp = {{"ok", false}, {"error", "unknown command"}};
             }

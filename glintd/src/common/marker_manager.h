@@ -1,20 +1,18 @@
 ﻿#pragma once
-#include <mutex>
-#include <vector>
-#include <cstdint>
 #include <string>
+#include <vector>
 
 struct Marker {
-    std::uint64_t timestamp_ms;
-    double pre_sec;
-    double post_sec;
+    int id;
+    int ts_ms;
+    int pre;
+    int post;
 };
 
 class MarkerManager {
 public:
-    void add(Marker m);
-    std::vector<Marker> list() const;
-private:
-    mutable std::mutex mtx_;
-    std::vector<Marker> markers_;
+    int addSession(const std::string& game, const std::string& container = "", const std::string& output = "");
+    void stopSession(int id);
+    void addMarker(int sid, int ts, int pre, int post);
+    std::vector<Marker> listMarkers(int sid);
 };
