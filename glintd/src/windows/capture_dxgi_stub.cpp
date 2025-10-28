@@ -1,37 +1,15 @@
-﻿#include "../common/capture_base.h"
+﻿#include "capture_base.h"
 #include "../common/logger.h"
-#include <thread>
-#include <atomic>
-#include <chrono>
+#include <d3d11.h>
+#include <dxgi1_2.h>
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dxgi.lib")
 
-class WinCaptureStub : public CaptureBase {
-    std::atomic<bool> running_{false};
-    std::thread worker_;
+class DxgiCapture : public IVideoCapture {
 public:
-    bool init() override {
-        Logger::instance().info("[WIN] Capture init");
-        return true;
-    }
-    bool start() override {
-        if (running_) return true;
-        running_ = true;
-        worker_ = std::thread([this]{
-            Logger::instance().info("[WIN] Capture started");
-            while (running_) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
-            Logger::instance().info("[WIN] Capture thread exit");
-        });
-        return true;
-    }
-    void stop() override {
-        if (!running_) return;
-        running_ = false;
-        if (worker_.joinable()) worker_.join();
-        Logger::instance().info("[WIN] Capture stopped");
-    }
-};
+    explicit DxgiCapture(int targetFps, bool withCursor);
+    bool start(VideoCallback cb) override;
+    void stop() override;
+private:
 
-extern "C" CaptureBase* create_capture() {
-    return new WinCaptureStub();
-}
+};

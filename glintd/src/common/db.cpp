@@ -59,8 +59,39 @@ bool DB::open() {
     return true;
 }
 
+void DB::insertChunk(int sessionId, const std::string& path, int64_t startMs, int64_t endMs,
+                     int64_t keyframeMs, uint64_t sizeBytes) {
+    const char* sql = "INSERT INTO chunks(session_id, path, start_ms, end_ms, keyframe_ms, size_bytes) VALUES(?,?,?,?,?,?);";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return;
+    sqlite3_bind_int(stmt, 1, sessionId);
+    sqlite3_bind_text(stmt, 2, path.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, 3, startMs);
+    sqlite3_bind_int64(stmt, 4, endMs);
+    sqlite3_bind_int64(stmt, 5, keyframeMs);
+    sqlite3_bind_int64(stmt, 6, sizeBytes);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
+
+bool DB::columnExists(const char* table, const char* column) const {
+    sqlite3_stmt* stmt;
+    std::string sql = "PRAGMA table_info(" + std::string(table) + ");";
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK)
+        return false;
+    bool found = false;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char* name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        if (strcmp(name, column) == 0) { found = true; break; }
+    }
+    sqlite3_finalize(stmt);
+    return found;
+}
+
 void DB::initSchema() {
-    const char* schema = R"SQL(
+    const char* stmts[] = {
+        R"SQL(
 CREATE TABLE IF NOT EXISTS sessions(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     game TEXT NOT NULL,
@@ -69,6 +100,8 @@ CREATE TABLE IF NOT EXISTS sessions(
     container TEXT,
     output_mp4 TEXT
 );
+)SQL",
+        R"SQL(
 CREATE TABLE IF NOT EXISTS markers(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id INTEGER NOT NULL,
@@ -77,6 +110,8 @@ CREATE TABLE IF NOT EXISTS markers(
     post INTEGER NOT NULL,
     FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
+)SQL",
+        R"SQL(
 CREATE TABLE IF NOT EXISTS chunks(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id INTEGER NOT NULL,
@@ -86,11 +121,18 @@ CREATE TABLE IF NOT EXISTS chunks(
     keyframe_ms INTEGER,
     FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
-)SQL";
+)SQL"
+    };
     char* err = nullptr;
-    if (sqlite3_exec(db, schema, nullptr, nullptr, &err) != SQLITE_OK) {
-        std::cerr << "Schema init error: " << err << std::endl;
-        sqlite3_free(err);
+    for (auto* sql : stmts) {
+        if (sqlite3_exec(db, sql, nullptr, nullptr, &err) != SQLITE_OK) {
+            Logger::instance().error(std::string("Schema init failed: ") + err);
+            sqlite3_free(err);
+        }
+    }
+
+    if (!columnExists("chunks", "size_bytes")) {
+        sqlite3_exec(db, "ALTER TABLE chunks ADD COLUMN size_bytes INTEGER DEFAULT 0;", nullptr, nullptr, nullptr);
     }
 }
 

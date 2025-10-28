@@ -1,0 +1,8 @@
+﻿//
+// Created by Tymur on 10/28/2025.
+//
+
+#ifndef GLINT_RECORDING_PIPELINE_H
+#define GLINT_RECORDING_PIPELINE_H
+
+#endif //GLINT_RECORDING_PIPELINE_H

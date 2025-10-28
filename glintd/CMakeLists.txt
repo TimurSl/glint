@@ -24,6 +24,14 @@ set(COMMON_SOURCES
         src/rpc/handlers.h
         src/common/db.cpp
         src/common/db.h
+        src/common/encoder.h
+        src/common/muxer.h
+        src/common/ff/encoder_ffmpeg.cpp
+        src/common/ff/encoder_ffmpeg.h
+        src/common/ff/muxer_avformat.cpp
+        src/common/ff/muxer_avformat.h
+        src/common/recording_pipeline.cpp
+        src/common/recording_pipeline.h
 )
 
 if(WIN32)
