@@ -32,20 +32,50 @@ set(COMMON_SOURCES
         src/common/ff/muxer_avformat.h
         src/common/recording_pipeline.cpp
         src/common/recording_pipeline.h
+        src/common/ffmpeg_common.h
+        src/common/encoder_ffmpeg.h
+        src/common/encoder_ffmpeg.cpp
+        src/common/recorder.cpp
+        src/common/recorder.h
 )
 
-if(WIN32)
+find_library(AVCODEC_LIBRARY avcodec REQUIRED)
+find_library(AVFORMAT_LIBRARY avformat REQUIRED)
+find_library(AVUTIL_LIBRARY avutil REQUIRED)
+find_library(SWSCALE_LIBRARY swscale REQUIRED)
+find_library(SWRESAMPLE_LIBRARY swresample REQUIRED)
+
+if (WIN32)
+    # DXGI + D3D11 + WASAPI
+    set(OS_LIBS
+            dxgi
+            d3d11
+            d3dcompiler
+            ole32
+            avrt
+            mmdevapi
+            uuid
+    )
+else ()
+    find_library(PIPEWIRE_LIBRARY pipewire-0.3 OPTIONAL)
+    find_library(X11_LIBRARY X11 OPTIONAL)
+    set(OS_LIBS ${PIPEWIRE_LIBRARY} ${X11_LIBRARY})
+endif ()
+
+if (WIN32)
     set(PLATFORM_SOURCES
             src/windows/capture_dxgi_stub.cpp
-            src/windows/ipc_server_pipe_win.cpp)
+            src/windows/ipc_server_pipe_win.cpp
+            src/windows/capture_dxgi.cpp)
     add_definitions(-DGLINT_WINDOWS)
-else()
+else ()
     set(PLATFORM_SOURCES
             src/linux/capture_linux_stub.cpp
             src/linux/ipc_server_pipe_unix.cpp
-            src/common/constants.h)
+            src/common/constants.h
+            src/windows/audio_wasapi.cpp)
     add_definitions(-DGLINT_LINUX)
-endif()
+endif ()
 
 add_executable(glintd
         src/main.cpp
@@ -61,10 +91,25 @@ target_include_directories(glintd PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/common
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-if(WIN32)
+target_compile_definitions(glintd PRIVATE
+        _CRT_SECURE_NO_WARNINGS
+        NOMINMAX
+        GLINT_ENABLE_NVENC
+)
+
+target_link_libraries(glintd PRIVATE
+        ${AVCODEC_LIBRARY}
+        ${AVFORMAT_LIBRARY}
+        ${AVUTIL_LIBRARY}
+        ${SWSCALE_LIBRARY}
+        ${SWRESAMPLE_LIBRARY}
+        ${OS_LIBS}
+)
+
+if (WIN32)
     target_link_libraries(glintd PRIVATE
             Dwmapi
     )
-else()
+else ()
     target_link_libraries(glintd PRIVATE pthread)
-endif()
+endif ()
