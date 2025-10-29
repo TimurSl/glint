@@ -17,7 +17,7 @@ struct VideoSettings {
     int fps{60};
     int bitrate_kbps{18000};
     std::string codec{"h264"};
-    std::string encoder{"auto"}; // "auto" | "nvenc" | "vaapi" | "software"
+    std::string encoder{"software"}; // "auto" | "nvenc" | "vaapi" | "software"
 };
 
 struct AudioSettings {

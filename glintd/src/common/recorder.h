@@ -19,7 +19,7 @@ struct RecorderConfig {
     int height{1080};
     int fps{60};
     int video_bitrate_kbps{12000};
-    std::string video_codec{"h264"};
+    std::string video_codec{"h264_nvenc"};
     std::string video_encoder{"auto"};
 
     int audio_sample_rate{48000};

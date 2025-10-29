@@ -189,8 +189,7 @@ CREATE TABLE IF NOT EXISTS sessions(
     output_mp4 TEXT
     ts_ms INTEGER NOT NULL,
     pre INTEGER NOT NULL,
-    post INTEGER NOT NULL,
-    FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    post INTEGER NOT NULL
 );
 )SQL",
         R"SQL(

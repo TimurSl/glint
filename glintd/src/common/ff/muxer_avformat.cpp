@@ -301,7 +301,7 @@ bool MuxerAvFormat::createStream(const EncoderStreamInfo& info, int& index_out) 
 
     const AVCodec* codec = avcodec_find_encoder_by_name(info.codec_name.c_str());
     if (!codec) {
-        Logger::instance().warn("MuxerAvFormat: encoder" + info.codec_name + " not found, falling back to defaults");
+        Logger::instance().warn("MuxerAvFormat: encoder " + info.codec_name + " not found, falling back to defaults");
         codec = avcodec_find_encoder(info.type == EncodedStreamType::Video ? AV_CODEC_ID_H264 : AV_CODEC_ID_AAC);
     }
 
@@ -421,7 +421,7 @@ void MuxerAvFormat::injectExtradataIfNeeded(const EncodedPacket& packet) const {
     }
 }
 
-bool MuxerAvFormat::ensureHeader(const EncodedPacket& packet, AVStream* /*stream*/) {
+bool MuxerAvFormat::ensureHeader(const EncodedPacket& packet, AVStream* stream) {
     if (header_written_) {
         return true;
     }
@@ -429,12 +429,25 @@ bool MuxerAvFormat::ensureHeader(const EncodedPacket& packet, AVStream* /*stream
         return false;
     }
 
-    if (video_stream_ >= 0 && packet.type != EncodedStreamType::Video) {
+    // Ждем первый видео-пакет для создания заголовка (иначе FFmpeg не знает параметры)
+    if (packet.type != EncodedStreamType::Video) {
         return true;
     }
 
-    if (packet.type == EncodedStreamType::Video) {
-        injectExtradataIfNeeded(packet);
+    injectExtradataIfNeeded(packet);
+
+    for (unsigned int i = 0; i < ctx_->nb_streams; ++i) {
+        AVStream* s = ctx_->streams[i];
+        if (!s || !s->codecpar) {
+            Logger::instance().error("MuxerAvFormat: invalid stream state before header write");
+            header_failed_ = true;
+            setError(MuxerError::HeaderWriteFailed);
+            return false;
+        }
+
+        if (s->time_base.num == 0 || s->time_base.den == 0) {
+            s->time_base = AVRational{1, 1000};
+        }
     }
 
     int ret = avformat_write_header(ctx_.get(), nullptr);
@@ -447,6 +460,7 @@ bool MuxerAvFormat::ensureHeader(const EncodedPacket& packet, AVStream* /*stream
 
     header_written_ = true;
     Logger::instance().info("MuxerAvFormat: header written to " + output_path_.string());
+
     return flushPendingPacketsUnlocked();
 }
 
