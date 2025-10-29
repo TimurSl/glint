@@ -75,7 +75,7 @@ bool AvMuxer::addStream(const EncoderStreamInfo& info, int& index_out) {
         return false;
     }
 
-    stream->time_base = AVRational{info.timebase_num, info.timebase_den};
+    stream->time_base = AVRational{1, 1000};
     AVCodecParameters* params = stream->codecpar;
     params->codec_type = (info.type == EncodedStreamType::Video) ? AVMEDIA_TYPE_VIDEO : AVMEDIA_TYPE_AUDIO;
     params->codec_id = codec ? codec->id : (info.type == EncodedStreamType::Video ? AV_CODEC_ID_H264 : AV_CODEC_ID_AAC);
@@ -256,29 +256,31 @@ bool AvMuxer::write(const EncodedPacket& packet) {
         Logger::instance().info("AvMuxer: header written");
     }
     auto& clk = clkFor(packet.type);
-    int64_t in_ms = (int64_t)packet.pts;
+    int64_t in_ms = (packet.dts != AV_NOPTS_VALUE) ? packet.dts : packet.pts;
     if (clk.base_ms < 0) clk.base_ms = in_ms;
 
-    int64_t norm_ms = in_ms - clk.base_ms;
-    if (clk.last_ms >= 0 && norm_ms <= clk.last_ms) {
-        norm_ms = clk.last_ms + 1;
-    }
-    clk.last_ms = norm_ms;
+    int64_t norm_dts = in_ms - clk.base_ms;
+    if (clk.last_ms >= 0 && norm_dts <= clk.last_ms) norm_dts = clk.last_ms + 1;
+    clk.last_ms = norm_dts;
+
+    int64_t norm_pts = (packet.pts - clk.base_ms);
+    if (norm_pts < norm_dts) norm_pts = norm_dts;
 
     AVPacket* pkt = av_packet_alloc();
     if (!pkt) return false;
 
-    pkt->pts = av_rescale_q(norm_ms, AVRational{1,1000}, stream->time_base);
-    pkt->dts = pkt->pts;
+    pkt->dts = norm_dts;
+    pkt->pts = norm_pts;
     pkt->duration = 0;
     if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-        pkt->duration = 1;
+        pkt->duration = 1; // TODO: made this shit look better with configs
     }
 
     pkt->data = const_cast<uint8_t*>(packet.data.data());
     pkt->size = (int)packet.data.size();
     pkt->stream_index = stream->index;
     if (packet.keyframe) pkt->flags |= AV_PKT_FLAG_KEY;
+    av_packet_rescale_ts(pkt, AVRational{1,1000}, stream->time_base);
 
     int ret = av_interleaved_write_frame(ctx_, pkt);
     av_packet_free(&pkt);

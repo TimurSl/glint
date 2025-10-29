@@ -9,7 +9,9 @@
 
 extern "C" {
 #include <libavcodec/bsf.h>
+#include <libswscale/swscale.h>
 }
+
 namespace {
 #if LIBAVUTIL_VERSION_MAJOR >= 57
     bool copyDefaultLayout(AVChannelLayout &target, int channels) {
@@ -105,25 +107,24 @@ bool FFmpegEncoder::initVideo(const std::string &codec, int w, int h, int fps, i
 
     video_ctx_->width = w;
     video_ctx_->height = h;
-    video_ctx_->time_base = av_inv_q(AVRational{fps, 1});
+    video_ctx_->time_base = AVRational{1, fps};
     video_ctx_->framerate = AVRational{fps, 1};
 
-    video_ctx_->bit_rate   = static_cast<int64_t>(br_kbps) * 1000;
-    video_ctx_->gop_size   = fps * 2;
+    video_ctx_->bit_rate = static_cast<int64_t>(br_kbps) * 1000;
+    video_ctx_->gop_size = fps * 2;
     video_ctx_->max_b_frames = 0;
-    video_ctx_->pix_fmt    = choosePixelFormat(video_ctx_->codec);
+    video_ctx_->pix_fmt = choosePixelFormat(video_ctx_->codec);
     video_ctx_->thread_count = 0;
 
-    if (video_ctx_->codec_id == AV_CODEC_ID_H264) {
-        av_opt_set(video_ctx_->priv_data, "preset", "fast", 0);
-        if (strstr(video_ctx_->codec->name, "nvenc")) {
-            av_opt_set_int(video_ctx_->priv_data, "bf", 0, 0);           // без B-frames
-            av_opt_set_int(video_ctx_->priv_data, "repeat_headers", 1, 0); // SPS/PPS на каждом ключе
-            av_opt_set_int(video_ctx_->priv_data, "annexb", 1, 0);         // Annex-B (старткоды)
-        } else if (strcmp(video_ctx_->codec->name, "libx264") == 0) {
-            av_opt_set(video_ctx_->priv_data, "tune", "zerolatency", 0);
-            av_opt_set(video_ctx_->priv_data, "x264-params", "bframes=0:repeat-headers=1:aud=1", 0);
-        }
+    if (video_ctx_->codec && strstr(video_ctx_->codec->name, "nvenc")) {
+        av_opt_set_int(video_ctx_->priv_data, "bf", 0, 0);
+        av_opt_set_int(video_ctx_->priv_data, "rc-lookahead", 0, 0);
+    }
+
+    if (strcmp(video_ctx_->codec->name, "libx264") == 0) {
+        av_opt_set(video_ctx_->priv_data, "tune", "zerolatency", 0);
+        av_opt_set_int(video_ctx_->priv_data, "bframes", 0, 0);
+        av_opt_set_int(video_ctx_->priv_data, "rc-lookahead", 0, 0);
     }
 
     video_frame_ = av_frame_alloc();
@@ -137,9 +138,9 @@ bool FFmpegEncoder::initVideo(const std::string &codec, int w, int h, int fps, i
         return false;
     }
 
-    scaler_ = sws_getContext(w, h, AV_PIX_FMT_RGBA,
-                             w, h, static_cast<AVPixelFormat>(video_frame_->format),
-                             SWS_BICUBIC, nullptr, nullptr, nullptr);
+    scaler_ = sws_getContext(w, h, AV_PIX_FMT_BGRA, w, h, (AVPixelFormat) video_frame_->format, SWS_BICUBIC, nullptr,
+                             nullptr, nullptr);
+
     if (!scaler_) {
         Logger::instance().error("FFmpegEncoder: failed creating scaler");
         return false;
@@ -228,13 +229,13 @@ bool FFmpegEncoder::open() {
     }
 
     if (video_ctx_) {
-        AVFrame* dummy = av_frame_alloc();
-        dummy->width  = video_ctx_->width;
+        AVFrame *dummy = av_frame_alloc();
+        dummy->width = video_ctx_->width;
         dummy->height = video_ctx_->height;
         dummy->format = video_ctx_->pix_fmt;
         if (av_frame_get_buffer(dummy, 32) >= 0) {
             if (avcodec_send_frame(video_ctx_, dummy) >= 0) {
-                AVPacket* pkt = av_packet_alloc();
+                AVPacket *pkt = av_packet_alloc();
                 if (avcodec_receive_packet(video_ctx_, pkt) >= 0) {
                     copyExtradata(video_ctx_, video_stream_info_);
                     if (video_ctx_->extradata && video_ctx_->extradata_size > 0) {
@@ -270,11 +271,11 @@ bool FFmpegEncoder::open() {
         }
         state.frame_samples = state.ctx->frame_size > 0 ? state.ctx->frame_size : 960; // Opus = 960 samples
         state.fifo = av_audio_fifo_alloc(state.ctx->sample_fmt,
-        #if LIBAVUTIL_VERSION_MAJOR >= 57
+#if LIBAVUTIL_VERSION_MAJOR >= 57
                                          state.ctx->ch_layout.nb_channels,
-        #else
+#else
                                          state.ctx->channels,
-        #endif
+#endif
                                          state.frame_samples * 8);
         if (!state.fifo) {
             Logger::instance().error("FFmpegEncoder: failed to alloc audio fifo");
@@ -323,7 +324,8 @@ bool FFmpegEncoder::open() {
         av_channel_layout_uninit(&inputLayout);
 #else
         uint64_t inputLayout = 0;
-        if (!copyDefaultLayout(inputLayout, state.input_channels > 0 ? state.input_channels : state.ctx->channels)) {
+        if (!copyDefaultLayout(inputLayout,
+                               state.input_channels > 0 ? state.input_channels : state.ctx->channels)) {
             Logger::instance().warn("FFmpegEncoder: input layout unavailable");
             state.enabled = false;
             return false;
@@ -344,6 +346,19 @@ bool FFmpegEncoder::open() {
             state.enabled = false;
             return false;
         }
+        state.fifo = av_audio_fifo_alloc(state.ctx->sample_fmt,
+#if LIBAVUTIL_VERSION_MAJOR >= 57
+                                         state.ctx->ch_layout.nb_channels,
+
+#else
+                                         state.ctx->channels,
+#endif
+                                         state.frame_samples * 4);
+        if (!state.fifo) {
+            Logger::instance().warn("FFmpegEncoder: audio fifo alloc failed");
+            state.enabled = false;
+            return false;
+        }
         return true;
     };
 
@@ -351,18 +366,18 @@ bool FFmpegEncoder::open() {
     setupAudio(mic_audio_);
 
     if (video_ctx_ && (!video_ctx_->extradata || video_ctx_->extradata_size == 0)) {
-        AVPacket* pkt = av_packet_alloc();
+        AVPacket *pkt = av_packet_alloc();
         if (avcodec_receive_packet(video_ctx_, pkt) >= 0 && pkt->size > 4) {
             Logger::instance().info("FFmpegEncoder: received packet to extract extradata");
 
-            const AVBitStreamFilter* bsf = av_bsf_get_by_name("extract_extradata");
+            const AVBitStreamFilter *bsf = av_bsf_get_by_name("extract_extradata");
             if (bsf) {
-                AVBSFContext* ctx = nullptr;
+                AVBSFContext *ctx = nullptr;
                 if (av_bsf_alloc(bsf, &ctx) == 0) {
                     avcodec_parameters_from_context(ctx->par_in, video_ctx_);
                     av_bsf_init(ctx);
                     av_bsf_send_packet(ctx, pkt);
-                    AVPacket* out = av_packet_alloc();
+                    AVPacket *out = av_packet_alloc();
                     if (av_bsf_receive_packet(ctx, out) == 0 && out->size > 0) {
                         video_stream_info_.extradata.assign(out->data, out->data + out->size);
                         Logger::instance().info("FFmpegEncoder: extradata extracted using bsf");
@@ -377,18 +392,18 @@ bool FFmpegEncoder::open() {
     return true;
 }
 
-bool FFmpegEncoder::prepareVideoFrame(const uint8_t* rgba, int w, int h, int stride, uint64_t pts_ms) {
+bool FFmpegEncoder::prepareVideoFrame(const uint8_t *rgba, int w, int h, int stride, uint64_t pts_ms) {
     if (!video_ctx_ || !video_frame_) return false;
 
 
-    const AVPixelFormat srcFmt = AV_PIX_FMT_RGBA;
+    const AVPixelFormat srcFmt = AV_PIX_FMT_BGRA;
     const int useStride = (stride > 0) ? stride : (w * 4);
 
-    SwsContext* newScaler = sws_getCachedContext(
+    SwsContext *newScaler = sws_getCachedContext(
         scaler_,
         w, h, srcFmt,
         video_frame_->width, video_frame_->height,
-        (AVPixelFormat)video_frame_->format,
+        (AVPixelFormat) video_frame_->format,
         SWS_BICUBIC, nullptr, nullptr, nullptr);
     if (!newScaler) {
         Logger::instance().warn("FFmpegEncoder: cannot create scaler");
@@ -396,17 +411,40 @@ bool FFmpegEncoder::prepareVideoFrame(const uint8_t* rgba, int w, int h, int str
     }
     scaler_ = newScaler;
 
-    const uint8_t* src[4] = { rgba, nullptr, nullptr, nullptr };
-    int srcStride[4]      = { useStride, 0, 0, 0 };
+    const int *coeff = sws_getCoefficients(SWS_CS_ITU709);
+    int srcRange = 1; // full
+    int dstRange = 0; // limited
+
+    int brightness = 0;
+    int contrast   = 1 << 16; // 1.0 in fixed-point
+    int saturation = 1 << 16; // 1.0
+
+    if (scaler_) {
+        int rc = sws_setColorspaceDetails(
+            scaler_,
+            coeff, srcRange,
+            coeff, dstRange,
+            brightness, contrast, saturation
+        );
+        if (rc < 0) {
+            Logger::instance().warn("FFmpegEncoder: sws_setColorspaceDetails failed");
+            return false;
+        }
+    }
+
+    const uint8_t *src[4] = {rgba, nullptr, nullptr, nullptr};
+    int srcStride[4] = {useStride, 0, 0, 0};
     int rc = sws_scale(scaler_, src, srcStride, 0, h, video_frame_->data, video_frame_->linesize);
     if (rc <= 0) {
         Logger::instance().warn("FFmpegEncoder: sws_scale failed");
         return false;
     }
 
-    video_frame_->pts = av_rescale_q((int64_t)pts_ms, AVRational{1,1000}, video_ctx_->time_base);
+    // video_frame_->pts = av_rescale_q((int64_t) pts_ms, AVRational{1, 1000}, video_ctx_->time_base);
+    video_frame_->pts = video_pts_index_++;
     return true;
 }
+
 bool FFmpegEncoder::encodeFrame(AVCodecContext *ctx, AVFrame *frame, EncodedStreamType type,
                                 std::vector<EncodedPacket> &out) {
     if (!ctx) return false;
@@ -428,7 +466,18 @@ bool FFmpegEncoder::encodeFrame(AVCodecContext *ctx, AVFrame *frame, EncodedStre
         EncodedPacket encoded;
         encoded.type = type;
         encoded.keyframe = (pkt->flags & AV_PKT_FLAG_KEY) != 0;
-        encoded.pts = av_rescale_q(pkt->pts, ctx->time_base, AVRational{1, 1000});
+        if (pkt->pts != AV_NOPTS_VALUE) {
+            encoded.pts = av_rescale_q(pkt->pts, ctx->time_base, AVRational{1, 1000});
+        } else {
+            int64_t step_ms = (video_fps_ > 0) ? (1000 / video_fps_) : 16;
+            static int64_t fallback_ms = 0;
+            encoded.pts = fallback_ms;
+            fallback_ms += step_ms;
+        }
+        if (pkt->dts != AV_NOPTS_VALUE)
+            encoded.dts = av_rescale_q(pkt->dts, ctx->time_base, AVRational{1,1000});
+        else
+            encoded.dts = AV_NOPTS_VALUE;
         encoded.data.assign(pkt->data, pkt->data + pkt->size);
         out.emplace_back(std::move(encoded));
         av_packet_unref(pkt);
@@ -437,43 +486,37 @@ bool FFmpegEncoder::encodeFrame(AVCodecContext *ctx, AVFrame *frame, EncodedStre
     return true;
 }
 
-bool FFmpegEncoder::encodeAudioSamples(AudioEncoderState& state,
-    const float* interleaved, int samples, int sr, int ch,
-    uint64_t pts_ms, EncodedStreamType type, std::vector<EncodedPacket>& out)
-{
+bool FFmpegEncoder::encodeAudioSamples(AudioEncoderState &state,
+                                       const float *interleaved, int samples, int sr, int ch,
+                                       uint64_t pts_ms, EncodedStreamType type, std::vector<EncodedPacket> &out) {
     if (!state.enabled || !state.ctx || !state.frame || !state.resampler) return false;
 
-    // Resample во временный буфер
-    const uint8_t* srcData[1] = { reinterpret_cast<const uint8_t*>(interleaved) };
-    AVFrame* tmp = av_frame_alloc();
-    tmp->format = state.ctx->sample_fmt;
-#if LIBAVUTIL_VERSION_MAJOR >= 57
-    av_channel_layout_copy(&tmp->ch_layout, &state.ctx->ch_layout);
-#else
-    tmp->channel_layout = state.ctx->channel_layout;
-    tmp->channels = state.ctx->channels;
-#endif
-    tmp->sample_rate = state.ctx->sample_rate;
-    tmp->nb_samples = samples;
-    av_frame_get_buffer(tmp, 0);
+    const uint8_t *srcData[1] = {reinterpret_cast<const uint8_t *>(interleaved)};
+    const int src_samples = samples;
 
-    int converted = swr_convert(state.resampler,
-                                tmp->data, tmp->nb_samples,
-                                srcData, samples);
-    if (converted < 0) {
-        av_frame_free(&tmp);
-        return false;
+    if (av_frame_make_writable(state.frame) < 0) return false;
+    int got = swr_convert(state.resampler,
+                          state.frame->data, state.frame->nb_samples,
+                          srcData, src_samples);
+    if (got < 0) return false;
+
+    if (got > 0) {
+        if (av_audio_fifo_write(state.fifo, (void **) state.frame->data, got) < got) {
+            return false;
+        }
     }
-
-    av_audio_fifo_write(state.fifo, (void**)tmp->data, converted);
-    av_frame_free(&tmp);
 
     while (av_audio_fifo_size(state.fifo) >= state.frame_samples) {
         if (av_frame_make_writable(state.frame) < 0) return false;
-        av_audio_fifo_read(state.fifo, (void**)state.frame->data, state.frame_samples);
+        if (av_audio_fifo_read(state.fifo, (void **) state.frame->data, state.frame_samples) < state.
+            frame_samples) {
+            return false;
+        }
         state.frame->nb_samples = state.frame_samples;
-        state.frame->pts = av_rescale_q((int64_t)pts_ms, AVRational{1, 1000}, state.ctx->time_base);
-        encodeFrame(state.ctx, state.frame, type, out);
+        int64_t pts_ms_exact = (state.samples_sent * 1000) / state.ctx->sample_rate;
+        state.frame->pts = av_rescale_q(pts_ms_exact, AVRational{1, 1000}, state.ctx->time_base);
+        if (!encodeFrame(state.ctx, state.frame, type, out)) return false;
+        state.samples_sent += state.frame_samples;
     }
     return true;
 }
@@ -493,21 +536,23 @@ bool FFmpegEncoder::pushAudioF32(const float *interleaved, int samples, int sr, 
         state.input_channels = ch;
 
 #if LIBAVUTIL_VERSION_MAJOR >= 57
-        AVChannelLayout inL{}; av_channel_layout_default(&inL, ch);
+        AVChannelLayout inL{};
+        av_channel_layout_default(&inL, ch);
         swr_free(&state.resampler);
         if (swr_alloc_set_opts2(&state.resampler,
                                 &state.ctx->ch_layout, state.ctx->sample_fmt, state.ctx->sample_rate,
                                 &inL, AV_SAMPLE_FMT_FLT, sr, 0, nullptr) < 0 || swr_init(state.resampler) < 0) {
             Logger::instance().warn("FFmpegEncoder: resampler reinit failed");
             return false;
-                                }
+        }
         av_channel_layout_uninit(&inL);
 #else
         uint64_t inMask = av_get_default_channel_layout(ch);
         swr_free(&state.resampler);
         state.resampler = swr_alloc_set_opts(nullptr,
-                        state.ctx->channel_layout, state.ctx->sample_fmt, state.ctx->sample_rate,
-                        inMask, AV_SAMPLE_FMT_FLT, sr, 0, nullptr);
+                                             state.ctx->channel_layout, state.ctx->sample_fmt,
+                                             state.ctx->sample_rate,
+                                             inMask, AV_SAMPLE_FMT_FLT, sr, 0, nullptr);
         if (!state.resampler || swr_init(state.resampler) < 0) {
             Logger::instance().warn("FFmpegEncoder: resampler reinit failed");
             return false;

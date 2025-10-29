@@ -237,6 +237,7 @@ private:
         client->GetService(IID_PPV_ARGS(&capture));
         client->Start();
         std::vector<float> buffer;
+        auto t0 = std::chrono::steady_clock::now();
         while (running_) {
             WaitForSingleObject(eventHandle, 50);
             UINT32 packetFrames = 0;
@@ -268,7 +269,7 @@ private:
                     frame.channels = mixFormat->nChannels;
                     frame.samples = frames;
                     frame.pts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                        std::chrono::steady_clock::now().time_since_epoch()).count();
+                                       std::chrono::steady_clock::now() - t0).count();
                     frame.interleaved = buffer;
                     cb(frame, is_mic_);
                 }

@@ -11,7 +11,7 @@ void Detector::start(OnStart on_start, OnStop on_stop) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
         if (!running_) return;
         on_start("FakeGame");
-        std::this_thread::sleep_for(std::chrono::seconds(5));
+        std::this_thread::sleep_for(std::chrono::seconds(10));
         if (!running_) return;
         on_stop();
     });

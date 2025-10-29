@@ -40,6 +40,7 @@ private:
         int frame_samples{0};
         int input_channels{0};
         int input_sample_rate{0};
+        int64_t samples_sent{0};
         std::string codec_name;
         bool enabled{false};
     };
@@ -58,6 +59,7 @@ private:
     int video_stride_{0};
     int video_fps_{0};
     std::string video_codec_;
+    int64_t video_pts_index_{0};
 
     AudioEncoderState system_audio_;
     AudioEncoderState mic_audio_;

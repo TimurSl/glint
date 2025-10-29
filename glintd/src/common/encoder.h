@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+constexpr int64_t GLINT_NOPTS_VALUE = (std::numeric_limits<int64_t>::min)();
+
 enum class EncodedStreamType {
     Video,
     SystemAudio,
@@ -14,6 +16,7 @@ struct EncodedPacket {
     EncodedStreamType type{EncodedStreamType::Video};
     bool keyframe{false};
     std::vector<uint8_t> data;
+    int64_t dts {GLINT_NOPTS_VALUE};
     int64_t pts{0}; // milliseconds
 };
 
