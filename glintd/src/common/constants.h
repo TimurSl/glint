@@ -17,7 +17,7 @@ namespace glintd::consts {
 #endif
 
     // Файлы экспорта
-    inline constexpr const char* EXPORT_LAST_CLIP = "export_last_clip.txt";
+    inline constexpr const char* EXPORT_LAST_CLIP = "clips/last_clip.mkv";
     inline constexpr const char* EXPORT_MANUAL    = "export_manual.txt";
 
 } // namespace glintd::consts

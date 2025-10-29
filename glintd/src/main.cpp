@@ -7,7 +7,10 @@
 #include "common/detector.h"
 #include "common/ipc_server_pipe.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cctype>
+#include <filesystem>
 #include <thread>
 #include <sstream>
 
@@ -21,9 +24,23 @@ extern "C" CaptureBase* create_capture();
 extern "C" CaptureBase* create_capture();
 #endif
 
+namespace {
+std::string select_video_codec(const VideoSettings& video) {
+    std::string codec = video.codec;
+    std::string encoder = video.encoder;
+    std::transform(codec.begin(), codec.end(), codec.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+    std::transform(encoder.begin(), encoder.end(), encoder.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+    if (encoder == "nvenc" || encoder == "vaapi") {
+        return codec + "_" + encoder;
+    }
+    return codec;
+}
+}
+
 int main(int argc, char** argv) {
     auto& log = Logger::instance();
-    Config cfg = load_default_config();
+    const std::filesystem::path configPath{"glintd/config.toml"};
+    AppConfig appConfig = load_config(configPath);
 
     std::string socket_path;
     bool force_reset = false;
@@ -48,40 +65,69 @@ int main(int argc, char** argv) {
         socket_path = glintd::consts::default_socket_path();
 #endif
 
-    log.to_file(glintd::consts::LOG_FILE);
-    log.info("Logging to file: " + std::string(glintd::consts::LOG_FILE));
+    if (appConfig.general.file_logging) {
+        auto logDir = appConfig.general.log_path.parent_path();
+        if (!logDir.empty()) {
+            std::filesystem::create_directories(logDir);
+        }
+        log.to_file(appConfig.general.log_path.string());
+    }
+    log.info("Logging to file: " + appConfig.general.log_path.string());
     log.info("Glint Daemon starting...");
 
+    DB::instance().setCustomPath(appConfig.general.db_path);
     DB::instance().open();
     std::unique_ptr<CaptureBase> capture(create_capture());
-
-    RecorderConfig recorderCfg;
-    recorderCfg.width = cfg.video.width == 0 ? recorderCfg.width : cfg.video.width;
-    recorderCfg.height = cfg.video.height == 0 ? recorderCfg.height : cfg.video.height;
-    recorderCfg.fps = cfg.video.fps;
-    recorderCfg.video_bitrate_kbps = cfg.video.bitrate_kbps;
-    recorderCfg.video_codec = cfg.video.use_nvenc ? "h264_nvenc" : cfg.video.codec;
-    recorderCfg.audio_sample_rate = cfg.audio.sample_rate;
-    recorderCfg.audio_channels = cfg.audio.channels;
-    recorderCfg.audio_bitrate_kbps = cfg.audio.bitrate_kbps;
-    recorderCfg.audio_codec = cfg.audio.codec;
-    recorderCfg.rolling_directory = cfg.buffer.dir;
-    recorderCfg.recordings_directory = cfg.record.out_dir;
-    recorderCfg.segment_length = std::chrono::milliseconds(cfg.buffer.segment_ms);
-    recorderCfg.retention = std::chrono::milliseconds(cfg.buffer.retention.max_total_ms);
-    recorderCfg.max_total_size_bytes = cfg.buffer.retention.max_total_bytes;
-
-    capture->setRecorderConfig(recorderCfg);
-
     ReplayBuffer replay;
-    replay.setRollingBufferEnabled(cfg.buffer.enabled);
+
+    auto applyConfig = [&](const AppConfig& cfg) {
+        const ProfileConfig& profile = cfg.activeProfile();
+        RecorderConfig recorderCfg;
+        recorderCfg.width = profile.video.width;
+        recorderCfg.height = profile.video.height;
+        recorderCfg.fps = profile.video.fps;
+        recorderCfg.video_bitrate_kbps = profile.video.bitrate_kbps;
+        recorderCfg.video_codec = select_video_codec(profile.video);
+        recorderCfg.audio_sample_rate = profile.audio.sample_rate;
+        recorderCfg.audio_channels = profile.audio.channels;
+        recorderCfg.audio_bitrate_kbps = profile.audio.bitrate_kbps;
+        recorderCfg.audio_codec = profile.audio.codec;
+        recorderCfg.enable_system_audio = profile.audio.enable_system;
+        recorderCfg.enable_microphone_audio = profile.audio.enable_microphone;
+        recorderCfg.buffer_directory = profile.buffer.segment_directory;
+        recorderCfg.recordings_directory = profile.buffer.output_directory;
+        recorderCfg.segment_prefix = profile.buffer.segment_prefix;
+        recorderCfg.segment_extension = profile.buffer.segment_extension;
+        recorderCfg.container = profile.buffer.container;
+        recorderCfg.rolling_size_limit_bytes = profile.buffer.size_limit_bytes;
+
+        capture->setRecorderConfig(recorderCfg);
+
+        ReplayBuffer::Options bufferOptions;
+        bufferOptions.buffer_enabled = profile.buffer.enabled;
+        bufferOptions.rolling_mode = profile.buffer.rolling_mode;
+        bufferOptions.rolling_size_limit_bytes = profile.buffer.size_limit_bytes;
+        bufferOptions.segment_root = profile.buffer.segment_directory;
+        bufferOptions.output_directory = profile.buffer.output_directory;
+        bufferOptions.temp_directory = cfg.general.temp_path;
+        bufferOptions.container = profile.buffer.container;
+        bufferOptions.segment_prefix = profile.buffer.segment_prefix;
+        bufferOptions.segment_extension = profile.buffer.segment_extension;
+        replay.applyOptions(bufferOptions);
+
+        CaptureRuntimeOptions runtimeOpts;
+        runtimeOpts.rolling_buffer_enabled = profile.buffer.rolling_mode;
+        capture->applyRuntimeOptions(runtimeOpts);
+    };
+
+    applyConfig(appConfig);
 
     MarkerManager markers;
     Detector detector;
     IpcServerPipe ipc(socket_path);
 
     CaptureRuntimeOptions runtimeOpts;
-    runtimeOpts.rolling_buffer_enabled = cfg.buffer.enabled;
+    runtimeOpts.rolling_buffer_enabled = appConfig.activeProfile().buffer.rolling_mode;
     capture->applyRuntimeOptions(runtimeOpts);
 
     if (!capture->init()) {
@@ -89,8 +135,10 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-
     replay.attachRecorder(&capture->recorder());
+
+    ConfigHotReloader reloader(configPath, appConfig, applyConfig);
+    reloader.start();
 
     detector.start(
         [&](const std::string& game){

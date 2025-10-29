@@ -37,6 +37,8 @@ set(COMMON_SOURCES
         src/common/recorder.cpp
         src/common/recorder.h
         src/common/frame_types.h
+        src/common/buffer_merger.cpp
+        src/common/buffer_merger.h
 )
 
 set(FFMPEG_ROOT "C:/Dev/ffmpeg")

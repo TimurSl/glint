@@ -2,22 +2,31 @@
 
 #include <atomic>
 #include <filesystem>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
-class Recorder;
+#include "recorder.h"
 
 class ReplayBuffer {
 public:
     struct Options {
-        std::filesystem::path export_directory{"exports"};
-        std::filesystem::path last_clip_path{"buffer/last_clip.mkv"};
-        bool rolling_buffer_enabled{true};
+        bool buffer_enabled{true};
+        bool rolling_mode{true};
+        uint64_t rolling_size_limit_bytes{100ull * 1024ull * 1024ull};
+        std::filesystem::path segment_root{"buffer"};
+        std::filesystem::path output_directory{"recordings"};
+        std::filesystem::path temp_directory{"temp"};
+        std::string container{"matroska"};
+        std::string segment_prefix{"seg_"};
+        std::string segment_extension{".mkv"};
     };
 
-    explicit ReplayBuffer(Options options = Options{"exports", "buffer/last_clip.mkv", true});;
+    explicit ReplayBuffer(Options options = Options{});
 
     void attachRecorder(Recorder* recorder);
+    void applyOptions(const Options& options);
 
     bool start_session(const std::string& game);
     void stop_session();
@@ -28,9 +37,20 @@ public:
     void setRollingBufferEnabled(bool enabled);
 
 private:
-    Options options_;
+    void onSegmentClosed(SegmentInfo& info);
+    void onSegmentRemoved(const SegmentInfo& info);
+    void cleanupChunks(const std::vector<SegmentInfo>& segments, const std::filesystem::path& directory);
+    std::filesystem::path buildSessionDirectory(int sessionId) const;
+    std::filesystem::path buildOutputPath(const std::string& game) const;
+
+    Options options_{};
     std::atomic<bool> running_{false};
-    std::string current_game_;
+    std::string current_game_{};
     Recorder* recorder_{nullptr};
     bool rolling_enabled_{true};
+    int current_session_id_{-1};
+    std::filesystem::path session_directory_{};
+    std::filesystem::path last_output_path_{};
+    std::vector<SegmentInfo> session_segments_{};
+    mutable std::mutex mutex_;
 };

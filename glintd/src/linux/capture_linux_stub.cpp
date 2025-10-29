@@ -187,7 +187,7 @@ protected:
     }
 
     std::unique_ptr<IMuxer> createMuxer() override {
-        return std::make_unique<AvMuxer>();
+        return std::make_unique<MuxerAvFormat>();
     }
 
 private:
@@ -206,7 +206,7 @@ private:
         }
         opts.recorder.video_codec = "h264";
         opts.recorder.audio_codec = "aac";
-        opts.recorder.rolling_directory = "buffer";
+        opts.recorder.buffer_directory = "buffer";
         opts.recorder.recordings_directory = "recordings";
         return opts;
     }
