@@ -11,6 +11,9 @@ struct MuxerConfig {
     std::string path;
     int tb_ms = 1;
     bool two_audio_tracks = true; // system + mic
+
+    std::string video_codec;
+    std::string audio_codec;
 };
 
 class IMuxer {

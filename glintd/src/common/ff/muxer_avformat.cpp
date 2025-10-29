@@ -3,6 +3,8 @@
 #include <filesystem>
 #include <cstring>
 
+#include "config.h"
+
 extern "C" {
 #include <libavutil/channel_layout.h>
 #include <libavutil/samplefmt.h>
@@ -45,9 +47,21 @@ AVRational ms_time_base{1, 1000};
 AvMuxer::AvMuxer() = default;
 AvMuxer::~AvMuxer() { close(); }
 
+AvMuxer::StreamClock& AvMuxer::clkFor(EncodedStreamType type) {
+    switch (type) {
+        case EncodedStreamType::Video:           return vclk_;
+        case EncodedStreamType::SystemAudio:     return a1clk_;
+        case EncodedStreamType::MicrophoneAudio: return a2clk_;
+    }
+    return vclk_;
+}
+
 bool AvMuxer::addStream(const EncoderStreamInfo& info, int& index_out) {
     if (info.codec_name.empty()) { index_out = -1; return true; }
 
+    if (info.type == EncodedStreamType::Video && info.extradata.empty()) {
+        Logger::instance().warn("AvMuxer: video stream has no extradata (SPS/PPS) — write_header may fail");
+    }
 
     const AVCodec* codec = avcodec_find_encoder_by_name(info.codec_name.c_str());
     if (!codec) {
@@ -69,7 +83,7 @@ bool AvMuxer::addStream(const EncoderStreamInfo& info, int& index_out) {
     if (info.type == EncodedStreamType::Video) {
         params->width  = info.width;
         params->height = info.height;
-        params->format = AV_PIX_FMT_NV12;
+        // params->format = AV_PIX_FMT_NV12;
     } else {
         params->sample_rate = (params->codec_id == AV_CODEC_ID_OPUS && info.sample_rate != 48000)
                                 ? 48000 : info.sample_rate; // Opus → 48k
@@ -84,7 +98,7 @@ bool AvMuxer::addStream(const EncoderStreamInfo& info, int& index_out) {
             Logger::instance().warn("AvMuxer: invalid channel setup for stream " + info.codec_name);
         }
 
-        params->format = AV_SAMPLE_FMT_FLTP;
+        // params->format = AV_SAMPLE_FMT_FLTP;
     }
 
     if (!info.extradata.empty()) {
@@ -98,6 +112,10 @@ bool AvMuxer::addStream(const EncoderStreamInfo& info, int& index_out) {
     return true;
 }
 
+static bool codec_ok(const AVOutputFormat* fmt, AVCodecID id) {
+    return avformat_query_codec(fmt, id, FF_COMPLIANCE_EXPERIMENTAL) > 0;
+}
+
 bool AvMuxer::open(const MuxerConfig& cfg,
                    const EncoderStreamInfo& video,
                    const EncoderStreamInfo& systemAudio,
@@ -105,11 +123,14 @@ bool AvMuxer::open(const MuxerConfig& cfg,
     close();
     config_ = cfg;
 
-
-    if (avformat_alloc_output_context2(&ctx_, nullptr, cfg.container.c_str(), cfg.path.c_str()) < 0 || !ctx_) {
+    Config config = load_default_config(); // TODO: Replace with actual loading
+    const char* want_mux = config.buffer.enabled ? "matroska" : (cfg.container.empty() ? "mp4" : cfg.container.c_str());
+    if (avformat_alloc_output_context2(&ctx_, nullptr, want_mux, cfg.path.c_str()) < 0 || !ctx_) {
         Logger::instance().error("AvMuxer: failed to allocate output context");
         return false;
     }
+    ctx_->max_interleave_delta = INT64_MAX;
+    ctx_->flags |= AVFMT_FLAG_FLUSH_PACKETS;
 
     if (!addStream(video, video_stream_)) return false;
     if (cfg.two_audio_tracks) {
@@ -117,34 +138,36 @@ bool AvMuxer::open(const MuxerConfig& cfg,
         addStream(micAudio, mic_stream_);
     }
 
+    auto *fmt = ctx_->oformat;
+    auto check_or_switch_container = [&]() -> bool {
+        const AVCodecParameters* vp = video_stream_ >= 0 ? ctx_->streams[video_stream_]->codecpar : nullptr;
+        const AVCodecParameters* ap1 = system_stream_ >= 0 ? ctx_->streams[system_stream_]->codecpar : nullptr;
+        const AVCodecParameters* ap2 = mic_stream_ >= 0 ? ctx_->streams[mic_stream_]->codecpar : nullptr;
+
+        auto is_mp4 = strcmp(fmt->name, "mp4") == 0 || strcmp(fmt->name, "mov") == 0;
+
+        auto has_opus = (ap1 && ap1->codec_id == AV_CODEC_ID_OPUS) || (ap2 && ap2->codec_id == AV_CODEC_ID_OPUS);
+        if (is_mp4 && has_opus) {
+            Logger::instance().warn("MP4 + Opus is not widely supported. Consider switch to Matroska container.");
+            return false;
+        }
+
+        if (is_mp4 && vp && vp->codec_id == AV_CODEC_ID_H264 && vp->extradata_size == 0) {
+            Logger::instance().error("MP4 want H.264 stream with extradata (avcC), but none provided.");
+            return false;
+        }
+        return true;
+    };
+    if (!check_or_switch_container()) return false;
+
     if (!(ctx_->oformat->flags & AVFMT_NOFILE)) {
         if (avio_open(&ctx_->pb, cfg.path.c_str(), AVIO_FLAG_WRITE) < 0) {
             Logger::instance().error("AvMuxer: could not open output file");
             return false;
         }
     }
-    Logger::instance().info("Muxer open: video=" + std::to_string(video_stream_) +
-                        " sys=" + std::to_string(system_stream_) +
-                        " mic=" + std::to_string(mic_stream_));
+    av_dump_format(ctx_, 0, cfg.path.c_str(), 1);
 
-    for (unsigned i = 0; i < ctx_->nb_streams; ++i) {
-        AVStream* s = ctx_->streams[i];
-        auto* p = s->codecpar;
-        Logger::instance().info("  Stream[" + std::to_string(i) + "]: codec=" + std::to_string(p->codec_id) +
-                                " type=" + std::to_string(p->codec_type) +
-                                " sr=" + std::to_string(p->sample_rate) +
-                                " ch=" + std::to_string(p->ch_layout.nb_channels) +
-                                " extradata=" + std::to_string(p->extradata_size));
-    }
-
-
-    int ret = avformat_write_header(ctx_, nullptr);
-    if (ret < 0) {
-        char err[256];
-        av_strerror(ret, err, sizeof(err));
-        Logger::instance().error(std::string("AvMuxer: write header failed: ") + err);
-        return false;
-    }
     return true;
 }
 
@@ -161,17 +184,99 @@ AVStream* AvMuxer::streamForType(EncodedStreamType type) const {
     return nullptr;
 }
 
+static const uint8_t* find_sc(const uint8_t* p, const uint8_t* end) {
+    const uint8_t* a = p;
+    while (a + 4 <= end) {
+        if (a[0]==0 && a[1]==0 && a[2]==1) return a;
+        if (a+4<=end && a[0]==0 && a[1]==0 && a[2]==0 && a[3]==1) return a+1;
+        ++a;
+    }
+    return end;
+}
+
+std::vector<uint8_t> AvMuxer::extractH264ExtradataFromAnnexB(const uint8_t* data, int size) {
+    std::vector<uint8_t> sps, pps, extradata;
+    const uint8_t* end = data + size;
+    const uint8_t* p = find_sc(data, end);
+    while (p < end) {
+        const uint8_t* next = find_sc(p + 3, end);
+        const uint8_t* nal = p;
+        while (nal < end && *nal == 0x00) ++nal;
+        if (nal < end && *nal == 0x01) ++nal;
+        if (nal >= end) break;
+
+        uint8_t nalu_type = nal[0] & 0x1F;
+        int payload_size = int(next - nal);
+        if (payload_size > 0) {
+            if (nalu_type == 7) sps.assign(nal, nal + payload_size); // SPS
+            if (nalu_type == 8) pps.assign(nal, nal + payload_size); // PPS
+        }
+        p = next;
+    }
+    if (!sps.empty() && !pps.empty()) {
+        static const uint8_t sc3[] = {0x00,0x00,0x01};
+        extradata.insert(extradata.end(), std::begin(sc3), std::end(sc3));
+        extradata.insert(extradata.end(), sps.begin(), sps.end());
+        extradata.insert(extradata.end(), std::begin(sc3), std::end(sc3));
+        extradata.insert(extradata.end(), pps.begin(), pps.end());
+    }
+    return extradata;
+}
+
 bool AvMuxer::write(const EncodedPacket& packet) {
     if (!ctx_) return false;
     AVStream* stream = streamForType(packet.type);
     if (!stream) return false;
 
+    if (!header_written_) {
+        if (packet.type != EncodedStreamType::Video) {
+            return true;
+        }
+        AVStream* vs = (video_stream_ >= 0) ? ctx_->streams[video_stream_] : nullptr;
+        if (vs && vs->codecpar->codec_id == AV_CODEC_ID_H264 && vs->codecpar->extradata_size == 0) {
+            auto extra = extractH264ExtradataFromAnnexB(packet.data.data(), (int)packet.data.size());
+            if (!extra.empty()) {
+                vs->codecpar->extradata = (uint8_t*)av_mallocz(extra.size() + AV_INPUT_BUFFER_PADDING_SIZE);
+                memcpy(vs->codecpar->extradata, extra.data(), extra.size());
+                vs->codecpar->extradata_size = (int)extra.size();
+                Logger::instance().info("AvMuxer: injected H.264 extradata (SPS/PPS) from first packet");
+            }
+        }
+
+        int ret = avformat_write_header(ctx_, nullptr);
+        if (ret < 0) {
+            if (!header_tried_without_extradata_) {
+                char err[256]; av_strerror(ret, err, sizeof(err));
+                Logger::instance().error(std::string("AvMuxer: deferred write_header failed: ") + err);
+                header_tried_without_extradata_ = true;
+            }
+            return false;
+        }
+        header_written_ = true;
+        Logger::instance().info("AvMuxer: header written");
+    }
+    auto& clk = clkFor(packet.type);
+    int64_t in_ms = (int64_t)packet.pts;
+    if (clk.base_ms < 0) clk.base_ms = in_ms;
+
+    int64_t norm_ms = in_ms - clk.base_ms;
+    if (clk.last_ms >= 0 && norm_ms <= clk.last_ms) {
+        norm_ms = clk.last_ms + 1;
+    }
+    clk.last_ms = norm_ms;
+
     AVPacket* pkt = av_packet_alloc();
     if (!pkt) return false;
-    pkt->data = const_cast<uint8_t*>(packet.data.data());
-    pkt->size = static_cast<int>(packet.data.size());
-    pkt->pts = av_rescale_q(packet.pts, ms_time_base, stream->time_base);
+
+    pkt->pts = av_rescale_q(norm_ms, AVRational{1,1000}, stream->time_base);
     pkt->dts = pkt->pts;
+    pkt->duration = 0;
+    if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+        pkt->duration = 1;
+    }
+
+    pkt->data = const_cast<uint8_t*>(packet.data.data());
+    pkt->size = (int)packet.data.size();
     pkt->stream_index = stream->index;
     if (packet.keyframe) pkt->flags |= AV_PKT_FLAG_KEY;
 

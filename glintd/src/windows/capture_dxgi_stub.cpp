@@ -85,64 +85,85 @@ private:
     }
 
     void captureLoop(const VideoCallback& cb) {
-        using namespace std::chrono;
-        auto interval = milliseconds(1000 / std::max(1, fps_));
-        auto next = steady_clock::now();
-        while (running_) {
-            DXGI_OUTDUPL_FRAME_INFO frameInfo{};
-            ComPtr<IDXGIResource> resource;
-            HRESULT hr = duplication_->AcquireNextFrame(16, &frameInfo, &resource);
-            if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
-                std::this_thread::sleep_for(interval);
-                continue;
-            }
-            if (FAILED(hr)) {
-                Logger::instance().warn("DxgiVideoCapture: AcquireNextFrame failed");
-                continue;
-            }
-            ComPtr<ID3D11Texture2D> texture;
-            resource.As(&texture);
-            D3D11_TEXTURE2D_DESC desc{};
-            texture->GetDesc(&desc);
-            desc.Usage = D3D11_USAGE_STAGING;
-            desc.BindFlags = 0;
-            desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-            desc.MiscFlags = 0;
-            ComPtr<ID3D11Texture2D> staging;
-            if (FAILED(device_->CreateTexture2D(&desc, nullptr, &staging))) {
-                duplication_->ReleaseFrame();
-                continue;
-            }
-            context_->CopyResource(staging.Get(), texture.Get());
-            D3D11_MAPPED_SUBRESOURCE mapped{};
-            if (FAILED(context_->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
-                duplication_->ReleaseFrame();
-                continue;
-            }
-            VideoFrame frame;
-            frame.width = static_cast<int>(desc.Width);
-            frame.height = static_cast<int>(desc.Height);
-            frame.stride = frame.width * 4;
-            frame.data.resize(static_cast<size_t>(frame.stride) * frame.height);
-            const uint8_t* src = static_cast<const uint8_t*>(mapped.pData);
-            for (int y = 0; y < frame.height; ++y) {
-                const uint8_t* row = src + y * mapped.RowPitch;
-                uint8_t* dst = frame.data.data() + y * frame.stride;
-                for (int x = 0; x < frame.width; ++x) {
-                    dst[x * 4 + 0] = row[x * 4 + 2];
-                    dst[x * 4 + 1] = row[x * 4 + 1];
-                    dst[x * 4 + 2] = row[x * 4 + 0];
-                    dst[x * 4 + 3] = 255;
-                }
-            }
-            context_->Unmap(staging.Get(), 0);
-            duplication_->ReleaseFrame();
-            frame.pts_ms = duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
-            cb(frame);
-            next += interval;
-            std::this_thread::sleep_until(next);
+    using namespace std::chrono;
+    auto interval = milliseconds(1000 / std::max(1, fps_));
+    auto next = steady_clock::now();
+
+    while (running_) {
+        DXGI_OUTDUPL_FRAME_INFO frameInfo{};
+        ComPtr<IDXGIResource> resource;
+        HRESULT hr = duplication_->AcquireNextFrame(16, &frameInfo, &resource);
+
+        if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
+            std::this_thread::sleep_for(interval);
+            continue;
         }
+
+        if (hr == DXGI_ERROR_ACCESS_LOST || hr == DXGI_ERROR_DEVICE_REMOVED) {
+            Logger::instance().warn("DxgiVideoCapture: duplication lost, recreating...");
+            duplication_.Reset();
+            if (FAILED(output1_->DuplicateOutput(device_.Get(), &duplication_))) {
+                std::this_thread::sleep_for(100ms);
+                continue;
+            }
+            continue;
+        }
+
+        if (FAILED(hr)) {
+            Logger::instance().warn("DxgiVideoCapture: AcquireNextFrame failed");
+            std::this_thread::sleep_for(10ms);
+            continue;
+        }
+
+        ComPtr<ID3D11Texture2D> texture;
+        resource.As(&texture);
+
+        D3D11_TEXTURE2D_DESC desc{};
+        texture->GetDesc(&desc);
+        desc.Usage = D3D11_USAGE_STAGING;
+        desc.BindFlags = 0;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        desc.MiscFlags = 0;
+
+        ComPtr<ID3D11Texture2D> staging;
+        if (FAILED(device_->CreateTexture2D(&desc, nullptr, &staging))) {
+            duplication_->ReleaseFrame();
+            continue;
+        }
+
+        context_->CopyResource(staging.Get(), texture.Get());
+
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (FAILED(context_->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+            duplication_->ReleaseFrame();
+            continue;
+        }
+
+        VideoFrame frame;
+        frame.width = static_cast<int>(desc.Width);
+        frame.height = static_cast<int>(desc.Height);
+        frame.stride = frame.width * 4;
+        frame.data.resize(static_cast<size_t>(frame.stride) * frame.height);
+
+        const uint8_t* src = static_cast<const uint8_t*>(mapped.pData);
+        for (int y = 0; y < frame.height; ++y) {
+            const uint8_t* row = src + y * mapped.RowPitch;
+            uint8_t* dst = frame.data.data() + y * frame.stride;
+            memcpy(dst, row, frame.stride);
+        }
+
+        context_->Unmap(staging.Get(), 0);
+        duplication_->ReleaseFrame();
+
+        frame.pts_ms = duration_cast<milliseconds>(
+            steady_clock::now().time_since_epoch()).count();
+        cb(frame);
+
+        next += interval;
+        std::this_thread::sleep_until(next);
     }
+}
+
 
     int fps_{60};
     bool capture_cursor_{true};

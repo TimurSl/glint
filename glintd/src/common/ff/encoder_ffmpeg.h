@@ -10,6 +10,7 @@ extern "C" {
 #include <libavutil/opt.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
+#include <libavutil/audio_fifo.h>
 }
 
 #include "encoder.h"
@@ -35,6 +36,7 @@ private:
         AVCodecContext* ctx{nullptr};
         SwrContext* resampler{nullptr};
         AVFrame* frame{nullptr};
+        AVAudioFifo* fifo{nullptr};
         int frame_samples{0};
         int input_channels{0};
         int input_sample_rate{0};
