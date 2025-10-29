@@ -9,6 +9,9 @@ public:
     static Logger& instance();
 
     void info(const std::string& msg);
+
+    void warn(const std::string &msg);
+
     void error(const std::string& msg);
 
     void to_file(const std::string& path);

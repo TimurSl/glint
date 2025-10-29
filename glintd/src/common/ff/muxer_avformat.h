@@ -1,11 +1,30 @@
 ﻿#pragma once
+
+extern "C" {
+#include <libavformat/avformat.h>
+}
+
 #include "muxer.h"
 
 class AvMuxer : public IMuxer {
 public:
-    bool open(const MuxerConfig& cfg) override;
-    bool writeVideo(const uint8_t* data, size_t sz, int64_t pts, bool key) override;
-    bool writeAudioSys(const uint8_t* data, size_t sz, int64_t pts) override;
-    bool writeAudioMic(const uint8_t* data, size_t sz, int64_t pts) override;
+    AvMuxer();
+    ~AvMuxer() override;
+
+    bool open(const MuxerConfig& cfg,
+              const EncoderStreamInfo& video,
+              const EncoderStreamInfo& systemAudio,
+              const EncoderStreamInfo& micAudio) override;
+    bool write(const EncodedPacket& packet) override;
     bool close() override;
+
+private:
+    bool addStream(const EncoderStreamInfo& info, int& index_out);
+    AVStream* streamForType(EncodedStreamType type) const;
+
+    AVFormatContext* ctx_{nullptr};
+    MuxerConfig config_;
+    int video_stream_{-1};
+    int system_stream_{-1};
+    int mic_stream_{-1};
 };

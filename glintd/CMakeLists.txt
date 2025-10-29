@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(COMMON_SOURCES
         src/common/capture_base.h
+        src/common/capture_base.cpp
         src/common/config.h
         src/common/config.cpp
         src/common/detector.h
@@ -33,11 +34,15 @@ set(COMMON_SOURCES
         src/common/recording_pipeline.cpp
         src/common/recording_pipeline.h
         src/common/ffmpeg_common.h
-        src/common/encoder_ffmpeg.h
-        src/common/encoder_ffmpeg.cpp
         src/common/recorder.cpp
         src/common/recorder.h
+        src/common/frame_types.h
 )
+
+set(FFMPEG_ROOT "C:/Dev/ffmpeg")
+set(CMAKE_PREFIX_PATH "${FFMPEG_ROOT}")
+link_directories("${FFMPEG_ROOT}/lib")
+include_directories("${FFMPEG_ROOT}/include")
 
 find_library(AVCODEC_LIBRARY avcodec REQUIRED)
 find_library(AVFORMAT_LIBRARY avformat REQUIRED)
@@ -59,14 +64,17 @@ if (WIN32)
 else ()
     find_library(PIPEWIRE_LIBRARY pipewire-0.3 OPTIONAL)
     find_library(X11_LIBRARY X11 OPTIONAL)
-    set(OS_LIBS ${PIPEWIRE_LIBRARY} ${X11_LIBRARY})
+    find_library(PULSE_LIBRARY pulse OPTIONAL)
+    find_library(PULSE_SIMPLE_LIBRARY pulse-simple OPTIONAL)
+    set(OS_LIBS ${PIPEWIRE_LIBRARY} ${X11_LIBRARY} ${PULSE_LIBRARY} ${PULSE_SIMPLE_LIBRARY})
 endif ()
 
 if (WIN32)
     set(PLATFORM_SOURCES
             src/windows/capture_dxgi_stub.cpp
             src/windows/ipc_server_pipe_win.cpp
-            src/windows/capture_dxgi.cpp)
+            src/windows/capture_dxgi.cpp
+            src/windows/ks_guids.cpp)
     add_definitions(-DGLINT_WINDOWS)
 else ()
     set(PLATFORM_SOURCES

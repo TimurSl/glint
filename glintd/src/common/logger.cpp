@@ -21,6 +21,10 @@ void Logger::info(const std::string& msg) {
     log(msg, "INFO");
 }
 
+void Logger::warn(const std::string& msg) {
+    log(msg, "WARN");
+}
+
 void Logger::error(const std::string& msg) {
     log(msg, "ERROR");
 }

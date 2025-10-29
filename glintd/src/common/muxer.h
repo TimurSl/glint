@@ -1,7 +1,10 @@
 ﻿#pragma once
-#include <string>
+
 #include <cstdint>
+#include <string>
 #include <vector>
+
+#include "encoder.h"
 
 struct MuxerConfig {
     std::string container = "matroska";
@@ -13,9 +16,10 @@ struct MuxerConfig {
 class IMuxer {
 public:
     virtual ~IMuxer() = default;
-    virtual bool open(const MuxerConfig& cfg) = 0;
-    virtual bool writeVideo(const uint8_t* data, size_t sz, int64_t pts, bool key) = 0;
-    virtual bool writeAudioSys(const uint8_t* data, size_t sz, int64_t pts) = 0;
-    virtual bool writeAudioMic(const uint8_t* data, size_t sz, int64_t pts) = 0;
+    virtual bool open(const MuxerConfig& cfg,
+                      const EncoderStreamInfo& video,
+                      const EncoderStreamInfo& systemAudio,
+                      const EncoderStreamInfo& micAudio) = 0;
+    virtual bool write(const EncodedPacket& packet) = 0;
     virtual bool close() = 0;
 };
