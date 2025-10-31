@@ -40,6 +40,8 @@ set(COMMON_SOURCES
         src/common/buffer_merger.cpp
         src/common/buffer_merger.h
         src/common/expected.h
+        src/common/ff/audio_capture_ffmpeg.cpp
+        src/common/ff/audio_capture_ffmpeg.h
 )
 
 set(FFMPEG_ROOT "C:/Dev/ffmpeg")
@@ -52,6 +54,8 @@ find_library(AVFORMAT_LIBRARY avformat REQUIRED)
 find_library(AVUTIL_LIBRARY avutil REQUIRED)
 find_library(SWSCALE_LIBRARY swscale REQUIRED)
 find_library(SWRESAMPLE_LIBRARY swresample REQUIRED)
+find_library(AVDEVICE_LIBRARY avdevice REQUIRED)
+
 
 if (WIN32)
     # DXGI + D3D11 + WASAPI
@@ -112,6 +116,7 @@ target_link_libraries(glintd PRIVATE
         ${AVCODEC_LIBRARY}
         ${AVFORMAT_LIBRARY}
         ${AVUTIL_LIBRARY}
+        ${AVDEVICE_LIBRARY}
         ${SWSCALE_LIBRARY}
         ${SWRESAMPLE_LIBRARY}
         ${OS_LIBS}

@@ -2,6 +2,7 @@
 #include "../common/logger.h"
 #include "../common/ff/encoder_ffmpeg.h"
 #include "../common/ff/muxer_avformat.h"
+#include "../common/ff/audio_capture_ffmpeg.h"
 
 #include <algorithm>
 #include <atomic>
@@ -9,7 +10,7 @@
 #include <memory>
 #include <thread>
 #include <vector>
-
+#include <cctype>
 
 #include <wrl/client.h>
 #include <d3d11.h>
@@ -306,9 +307,37 @@ protected:
     }
 
     std::unique_ptr<IAudioCapture> createMicrophoneCapture(const CaptureInitOptions& options) override {
-        return std::make_unique<WasapiCapture>(true, options.recorder.audio_sample_rate,
-                                              options.recorder.audio_channels);
+        auto trim = [](std::string value) {
+            value.erase(value.begin(), std::find_if(value.begin(), value.end(), [](unsigned char ch) { return !std::isspace(ch); }));
+            value.erase(std::find_if(value.rbegin(), value.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(), value.end());
+            return value;
+        };
+        auto formatDevice = [](const std::string& name) {
+            if (name.rfind("audio=", 0) == 0) {
+                return name;
+            }
+            return std::string("audio=") + name;
+        };
+
+        std::vector<std::string> candidates;
+        std::string device = trim(options.recorder.microphone_device);
+        if (device.empty() || device == "default") {
+            candidates.emplace_back("audio=default");
+        } else {
+            candidates.emplace_back(formatDevice(device));
+            candidates.emplace_back("audio=default");
+        }
+
+        FFmpegAudioCaptureOptions opts{};
+        opts.input_format = "dshow";
+        opts.device_candidates = std::move(candidates);
+        opts.sample_rate = options.recorder.audio_sample_rate;
+        opts.channels = options.recorder.audio_channels;
+        opts.is_microphone = true;
+        opts.log_prefix = "Microphone";
+        return std::make_unique<FFmpegAudioCapture>(std::move(opts));
     }
+
 
     std::unique_ptr<IEncoder> createEncoder() override {
         return std::make_unique<FFmpegEncoder>();
@@ -329,6 +358,7 @@ private:
         opts.recorder.audio_codec = "aac";
         opts.recorder.buffer_directory = "buffer";
         opts.recorder.recordings_directory = "recordings";
+        opts.recorder.microphone_device = "default";
         return opts;
     }
 };

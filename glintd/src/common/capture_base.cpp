@@ -18,19 +18,26 @@ bool CaptureBase::init() {
             return false;
         }
     }
-    if (!system_audio_) {
-        system_audio_ = createSystemAudioCapture(options_);
+    if (options_.recorder.enable_system_audio) {
         if (!system_audio_) {
-            Logger::instance().error("CaptureBase: failed to create system audio capture");
-            return false;
+            system_audio_ = createSystemAudioCapture(options_);
+            if (!system_audio_) {
+                Logger::instance().error("CaptureBase: failed to create system audio capture");
+                return false;
+            }
         }
+    } else {
+        system_audio_.reset();
     }
-    if (!mic_audio_) {
-        mic_audio_ = createMicrophoneCapture(options_);
+    if (options_.recorder.enable_microphone_audio) {
         if (!mic_audio_) {
-            Logger::instance().error("CaptureBase: failed to create microphone capture");
-            return false;
+            mic_audio_ = createMicrophoneCapture(options_);
+            if (!mic_audio_) {
+                Logger::instance().warn("CaptureBase: failed to create microphone capture");
+            }
         }
+    } else {
+        mic_audio_.reset();
     }
 
     if (!recorder_) {
@@ -70,18 +77,22 @@ bool CaptureBase::start() {
         return false;
     }
 
-    auto sysStarted = system_audio_->start([this](const AudioFrame& frame, bool) {
-        onAudioFrame(frame, false);
-    });
-    if (!sysStarted) {
-        Logger::instance().warn("CaptureBase: system audio capture unavailable");
+    if (options_.recorder.enable_system_audio && system_audio_) {
+        auto sysStarted = system_audio_->start([this](const AudioFrame& frame, bool) {
+            onAudioFrame(frame, false);
+        });
+        if (!sysStarted) {
+            Logger::instance().warn("CaptureBase: system audio capture unavailable");
+        }
     }
 
-    auto micStarted = mic_audio_->start([this](const AudioFrame& frame, bool) {
-        onAudioFrame(frame, true);
-    });
-    if (!micStarted) {
-        Logger::instance().warn("CaptureBase: microphone capture unavailable");
+    if (options_.recorder.enable_microphone_audio && mic_audio_) {
+        auto micStarted = mic_audio_->start([this](const AudioFrame& frame, bool) {
+            onAudioFrame(frame, true);
+        });
+        if (!micStarted) {
+            Logger::instance().warn("CaptureBase: microphone capture unavailable");
+        }
     }
 
     Logger::instance().info("CaptureBase: capture started");

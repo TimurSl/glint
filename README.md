@@ -63,7 +63,7 @@
 * [ ] Fast path: cut on nearest keyframes → **remux (copy)**
 * [ ] (Optional later) Smart render edges only
 * [ ] Use libavformat as muxer (no external ffmpeg process)
-* [ ] IPC: `{"cmd":"export","timestamp_ms":..., "pre":20000,"post":10000,"out":"clips/..."}`
+* [ ] IPC: `{"cmd":"clip_that"}` with optional `pre`/`post`/`out` args
 
 ---
 

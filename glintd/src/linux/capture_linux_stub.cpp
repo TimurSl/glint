@@ -2,6 +2,8 @@
 #include "../common/logger.h"
 #include "../common/ff/encoder_ffmpeg.h"
 #include "../common/ff/muxer_avformat.h"
+#include "../common/ff/audio_capture_ffmpeg.h"
+
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -11,6 +13,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cstring>
 #include <memory>
 #include <thread>
@@ -178,8 +181,54 @@ protected:
 
     std::unique_ptr<IAudioCapture> createMicrophoneCapture(const CaptureInitOptions& options) override {
         (void)options;
-        return std::make_unique<PulseAudioCapture>("@DEFAULT_SOURCE@", true, options.recorder.audio_sample_rate,
-                                                   options.recorder.audio_channels);
+        auto trim = [](std::string value) {
+            value.erase(value.begin(), std::find_if(value.begin(), value.end(), [](unsigned char ch) { return !std::isspace(ch); }));
+            value.erase(std::find_if(value.rbegin(), value.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(), value.end());
+            return value;
+        };
+
+        std::string device = trim(options.recorder.microphone_device);
+        std::string format = "pulse";
+        std::string lower = device;
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        if (lower.rfind("alsa:", 0) == 0) {
+            format = "alsa";
+            device = device.substr(5);
+            device = trim(device);
+        } else if (lower.rfind("pulse:", 0) == 0) {
+            format = "pulse";
+            device = device.substr(6);
+            device = trim(device);
+        }
+
+        std::vector<std::string> candidates;
+        if (device.empty() || device == "default") {
+            if (format == "pulse") {
+                candidates.emplace_back("default");
+                candidates.emplace_back("@DEFAULT_SOURCE@");
+            } else {
+                candidates.emplace_back("default");
+                candidates.emplace_back("hw:0,0");
+            }
+        } else {
+            candidates.emplace_back(device);
+            if (format == "pulse") {
+                candidates.emplace_back("default");
+                candidates.emplace_back("@DEFAULT_SOURCE@");
+            } else {
+                candidates.emplace_back("default");
+                candidates.emplace_back("hw:0,0");
+            }
+        }
+
+        FFmpegAudioCaptureOptions opts{};
+        opts.input_format = format;
+        opts.device_candidates = std::move(candidates);
+        opts.sample_rate = options.recorder.audio_sample_rate;
+        opts.channels = options.recorder.audio_channels;
+        opts.is_microphone = true;
+        opts.log_prefix = "Microphone";
+        return std::make_unique<FFmpegAudioCapture>(std::move(opts));
     }
 
     std::unique_ptr<IEncoder> createEncoder() override {
@@ -208,6 +257,7 @@ private:
         opts.recorder.audio_codec = "aac";
         opts.recorder.buffer_directory = "buffer";
         opts.recorder.recordings_directory = "recordings";
+        opts.recorder.microphone_device = "default";
         return opts;
     }
 };

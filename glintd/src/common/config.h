@@ -28,6 +28,7 @@ struct AudioSettings {
     bool enable_system{true};
     bool enable_microphone{true};
     bool enable_applications{false};
+    std::string device{"default"};
 };
 
 struct BufferSettings {

@@ -28,6 +28,7 @@ struct RecorderConfig {
     std::string audio_codec{"aac"};
     bool enable_system_audio{true};
     bool enable_microphone_audio{true};
+    std::string microphone_device{"default"};
 
     std::filesystem::path buffer_directory{"buffer"};
     std::filesystem::path recordings_directory{"recordings"};

@@ -40,7 +40,7 @@ std::string select_video_codec(const VideoSettings& video) {
 
 int main(int argc, char** argv) {
     auto& log = Logger::instance();
-    const std::filesystem::path configPath{"glintd/config.toml"};
+    const std::filesystem::path configPath{"config/config.json"};
     AppConfig appConfig = load_config(configPath);
 
     std::string socket_path;
@@ -96,6 +96,7 @@ int main(int argc, char** argv) {
         recorderCfg.audio_channels = profile.audio.channels;
         recorderCfg.audio_bitrate_kbps = profile.audio.bitrate_kbps;
         recorderCfg.audio_codec = profile.audio.codec;
+        recorderCfg.microphone_device = profile.audio.device;
         recorderCfg.enable_system_audio = profile.audio.enable_system;
         recorderCfg.enable_microphone_audio = profile.audio.enable_microphone;
         recorderCfg.buffer_directory = profile.buffer.segment_directory;

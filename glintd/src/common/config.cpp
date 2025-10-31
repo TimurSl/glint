@@ -1,5 +1,6 @@
 ﻿#include "config.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cctype>
 #include <filesystem>
@@ -13,6 +14,17 @@
 
 namespace {
 using json = nlohmann::json;
+
+std::string sanitize_device_name(std::string value) {
+    auto is_space = [](unsigned char ch) { return std::isspace(ch) != 0; };
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), [&](unsigned char ch) { return !is_space(ch); }));
+    value.erase(std::find_if(value.rbegin(), value.rend(), [&](unsigned char ch) { return !is_space(ch); }).base(), value.end());
+    if (value.empty()) {
+        return "default";
+    }
+    return value;
+}
+
 
 AppConfig make_default_config() {
     AppConfig cfg;
@@ -31,6 +43,7 @@ AppConfig make_default_config() {
     base.audio.enable_system = true;
     base.audio.enable_microphone = true;
     base.audio.enable_applications = false;
+    base.audio.device = "default";
 
     base.buffer.enabled = true;
     base.buffer.rolling_mode = true;
@@ -83,7 +96,8 @@ json profile_to_json(const ProfileConfig& profile) {
         {"bitrate_kbps", profile.audio.bitrate_kbps},
         {"enable_system", profile.audio.enable_system},
         {"enable_microphone", profile.audio.enable_microphone},
-        {"enable_applications", profile.audio.enable_applications}
+        {"enable_applications", profile.audio.enable_applications},
+        {"device", profile.audio.device}
     };
 
     j["buffer"] = {
@@ -119,6 +133,11 @@ ProfileConfig json_to_profile(const json& j, const ProfileConfig& fallback) {
         profile.audio.enable_system = a.value("enable_system", profile.audio.enable_system);
         profile.audio.enable_microphone = a.value("enable_microphone", profile.audio.enable_microphone);
         profile.audio.enable_applications = a.value("enable_applications", profile.audio.enable_applications);
+        if (a.contains("device") && a["device"].is_string()) {
+            profile.audio.device = sanitize_device_name(a.at("device").get<std::string>());
+        } else {
+            profile.audio.device = sanitize_device_name(profile.audio.device);
+        }
     }
     if (j.contains("buffer")) {
         const auto& b = j["buffer"];
