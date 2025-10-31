@@ -14,6 +14,8 @@ public:
 
     void error(const std::string& msg);
 
+    void debug(const std::string& msg);
+
     void to_file(const std::string& path);
 
 private:

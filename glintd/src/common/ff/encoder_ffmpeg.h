@@ -32,11 +32,53 @@ public:
     EncoderStreamInfo audioStream(bool mic) const override;
 
 private:
+    struct CodecContextDeleter {
+        void operator()(AVCodecContext* ctx) const noexcept { avcodec_free_context(&ctx); }
+    };
+
+    struct FrameDeleter {
+        void operator()(AVFrame* frame) const noexcept { av_frame_free(&frame); }
+    };
+
+    struct SwrContextDeleter {
+        void operator()(SwrContext* ctx) const noexcept { swr_free(&ctx); }
+    };
+
+    struct AudioFifoDeleter {
+        void operator()(AVAudioFifo* fifo) const noexcept { av_audio_fifo_free(fifo); }
+    };
+
+    struct PacketDeleter {
+        void operator()(AVPacket* pkt) const noexcept { av_packet_free(&pkt); }
+    };
+
+    using CodecContextPtr = std::unique_ptr<AVCodecContext, CodecContextDeleter>;
+    using FramePtr = std::unique_ptr<AVFrame, FrameDeleter>;
+    using SwrContextPtr = std::unique_ptr<SwrContext, SwrContextDeleter>;
+    using AudioFifoPtr = std::unique_ptr<AVAudioFifo, AudioFifoDeleter>;
+    using PacketPtr = std::unique_ptr<AVPacket, PacketDeleter>;
+
+    class SwsContextHandle {
+    public:
+        SwsContextHandle() = default;
+        ~SwsContextHandle();
+        SwsContextHandle(const SwsContextHandle&) = delete;
+        SwsContextHandle& operator=(const SwsContextHandle&) = delete;
+        SwsContextHandle(SwsContextHandle&& other) noexcept;
+        SwsContextHandle& operator=(SwsContextHandle&& other) noexcept;
+
+        void reset(SwsContext* ctx = nullptr) noexcept;
+        [[nodiscard]] SwsContext* get() const noexcept { return ctx_; }
+
+    private:
+        SwsContext* ctx_{nullptr};
+    };
+
     struct AudioEncoderState {
-        AVCodecContext* ctx{nullptr};
-        SwrContext* resampler{nullptr};
-        AVFrame* frame{nullptr};
-        AVAudioFifo* fifo{nullptr};
+        CodecContextPtr ctx{};
+        SwrContextPtr resampler{};
+        FramePtr frame{};
+        AudioFifoPtr fifo{};
         int frame_samples{0};
         int input_channels{0};
         int input_sample_rate{0};
@@ -49,17 +91,17 @@ private:
     bool encodeFrame(AVCodecContext* ctx, AVFrame* frame, EncodedStreamType type, std::vector<EncodedPacket>& out);
     bool encodeAudioSamples(AudioEncoderState& state, const float* interleaved, int samples, int sr, int ch,
                             uint64_t pts_ms, EncodedStreamType type, std::vector<EncodedPacket>& out);
-    static AVCodecContext* createContext(const std::string& codecName, bool allowHw);
+    static CodecContextPtr createContext(const std::string& codecName, bool allowHw);
 
-    AVCodecContext* video_ctx_{nullptr};
-    AVFrame* video_frame_{nullptr};
-    SwsContext* scaler_{nullptr};
+    CodecContextPtr video_ctx_{};
+    FramePtr video_frame_{};
+    SwsContextHandle scaler_{};
     int video_width_{0};
     int video_height_{0};
     int video_stride_{0};
     int video_fps_{0};
     std::string video_codec_;
-    int64_t video_pts_index_{0};
+    int64_t last_video_pts_{GLINT_NOPTS_VALUE};
 
     AudioEncoderState system_audio_;
     AudioEncoderState mic_audio_;

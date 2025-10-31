@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <format>
 #include <filesystem>
 #include <thread>
 #include <sstream>
@@ -76,7 +77,10 @@ int main(int argc, char** argv) {
     log.info("Glint Daemon starting...");
 
     DB::instance().setCustomPath(appConfig.general.db_path);
-    DB::instance().open();
+    if (auto dbOpen = DB::instance().open(); !dbOpen) {
+        log.error(std::format("Failed to open database: {}", dbOpen.error()));
+        return 1;
+    }
     std::unique_ptr<CaptureBase> capture(create_capture());
     ReplayBuffer replay;
 

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <limits>
 #include <vector>
 
 constexpr int64_t GLINT_NOPTS_VALUE = (std::numeric_limits<int64_t>::min)();

@@ -39,7 +39,7 @@ public:
 private:
     void onSegmentClosed(SegmentInfo& info);
     void onSegmentRemoved(const SegmentInfo& info);
-    void cleanupChunks(const std::vector<SegmentInfo>& segments, const std::filesystem::path& directory);
+    void cleanupChunks(const std::vector<SegmentInfo>& segments, const std::filesystem::path& directory, bool deleteFiles);
     std::filesystem::path buildSessionDirectory(int sessionId) const;
     std::filesystem::path buildOutputPath(const std::string& game) const;
 

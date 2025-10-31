@@ -32,7 +32,7 @@ struct AudioSettings {
 
 struct BufferSettings {
     bool enabled{true};
-    bool rolling_mode{true};
+    bool rolling_mode{false};
     uint64_t size_limit_bytes{100ull * 1024ull * 1024ull};
     std::filesystem::path segment_directory{"buffer"};
     std::filesystem::path output_directory{"recordings"};

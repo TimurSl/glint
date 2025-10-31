@@ -1,9 +1,12 @@
 ﻿#pragma once
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <sqlite3.h>
 #include <string>
 #include <vector>
+
+#include "expected.h"
 
 struct ChunkRecord {
     int64_t id{0};
@@ -19,25 +22,29 @@ public:
     static DB& instance();
 
     void setCustomPath(const std::filesystem::path& path);
-    bool open();
+    glint::Expected<void, std::string> open();
 
-    int64_t createSession(const std::string& game, int64_t startedAt, const std::string& container);
-    void finalizeSession(int64_t sessionId, int64_t stoppedAt, const std::string& outputMp4);
-    int64_t insertChunk(int sessionId, const std::string& path, int64_t startMs, int64_t endMs, std::optional<int64_t> keyframeMs);
+    glint::Expected<int64_t, std::string> createSession(const std::string& game, int64_t startedAt, const std::string& container);
+    glint::Expected<void, std::string> finalizeSession(int64_t sessionId, int64_t stoppedAt, const std::string& outputMp4);
+    glint::Expected<int64_t, std::string> insertChunk(int sessionId, const std::string& path, int64_t startMs, int64_t endMs, std::optional<int64_t> keyframeMs);
     std::vector<ChunkRecord> chunksForSession(int sessionId) const;
-    void removeChunk(int64_t chunkId);
-    void removeChunksForSession(int sessionId);
+    glint::Expected<void, std::string> removeChunk(int64_t chunkId);
+    glint::Expected<void, std::string> removeChunksForSession(int sessionId);
 
     bool columnExists(const char* table, const char* column) const;
 
-    void initSchema();
+    glint::Expected<void, std::string> initSchema();
     sqlite3* handle();
 
 private:
     DB();
     ~DB();
 
-    sqlite3* db{};
+    struct SqliteDeleter {
+        void operator()(sqlite3* handle) const noexcept { if (handle) sqlite3_close(handle); }
+    };
+
+    std::unique_ptr<sqlite3, SqliteDeleter> db_{};
     std::optional<std::filesystem::path> custom_path_{};
     std::filesystem::path getPath() const;
 };

@@ -29,6 +29,10 @@ void Logger::error(const std::string& msg) {
     log(msg, "ERROR");
 }
 
+void Logger::debug(const std::string &msg) {
+    log(msg, "DEBUG");
+}
+
 void Logger::to_file(const std::string& base_path) {
     std::lock_guard<std::mutex> lock(mtx_);
 

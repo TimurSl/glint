@@ -86,4 +86,7 @@ private:
     int mic_stream_{-1};
     std::deque<EncodedPacket> pending_packets_{};
     std::array<StreamState, 3> stream_states_{};
+
+    std::vector<uint8_t> cached_video_extradata_;
+
 };

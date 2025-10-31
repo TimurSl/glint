@@ -40,20 +40,20 @@
 
 ## M3 — Real video/audio capture + rolling replay buffer
 
-* [ ] Video capture
+* [x] Video capture
 
-    * [ ] Windows: DXGI Desktop Duplication → **NVENC** via libavcodec/libavformat
+    * [x] Windows: DXGI Desktop Duplication → **NVENC** via libavcodec/libavformat
     * [ ] Linux: PipeWire screen-cast (X11 fallback) → **NVENC/VAAPI**
-* [ ] Audio capture (minimal)
+* [x] Audio capture (minimal)
 
-    * [ ] Windows: WASAPI loopback (system) + microphone (2 tracks)
+    * [x] Windows: WASAPI loopback (system) + microphone (2 tracks)
     * [ ] Linux: PipeWire default monitor + mic (2 tracks)
-* [ ] Rolling buffer
+* [x] Rolling buffer
 
-    * [ ] Segment files `buffer/seg_XXXXXXXX.mkv` (~2 s each)
-    * [ ] Insert `chunks` rows with timestamps & keyframes
-    * [ ] Time/size retention (delete oldest)
-* [ ] Verify files play in VLC/mpv
+    * [x] Segment files `buffer/seg_XXXXXXXX.mkv` (~2 s each)
+    * [x] Insert `chunks` rows with timestamps & keyframes
+    * [x] Time/size retention (delete oldest)
+* [x] Verify files play in VLC/mpv
 
 ---
 

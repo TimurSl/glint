@@ -104,4 +104,7 @@ private:
     uint64_t buffered_size_bytes_{0};
     SegmentClosedCallback segment_closed_cb_{};
     SegmentRemovedCallback segment_removed_cb_{};
+    bool rotate_pending_ = false;
+
+
 };

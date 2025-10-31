@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <ctime>
+#include <format>
 #include <fstream>
 #include <iomanip>
 #include <numeric>
@@ -99,13 +100,16 @@ void Recorder::stop() {
         return;
     }
 
-    closeCurrentSegment();
+    Logger::instance().info("Recorder: stopping...");
+
     if (encoder_) {
         std::vector<EncodedPacket> packets;
         encoder_->flush(packets);
         handlePackets(packets);
         encoder_->close();
     }
+
+    closeCurrentSegment();
 }
 
 void Recorder::setRollingBufferEnabled(bool enabled) {
@@ -206,6 +210,7 @@ bool Recorder::openNewSegment() {
     }
 
     current_segment_ = seg;
+    rotate_pending_ = false;
     return true;
 }
 
@@ -229,6 +234,12 @@ void Recorder::closeCurrentSegment() {
         info.size_bytes = size;
         completed_segments_.push_back(info);
         buffered_size_bytes_ += size;
+
+        Logger::instance().info(std::format(
+            "Recorder: closed segment {} (size={} bytes, start={}ms, end={}ms, keyframe={}ms)",
+            info.path.string(), info.size_bytes, info.start_ms, info.end_ms, info.keyframe_ms
+        ));
+
         if (segment_closed_cb_) {
             segment_closed_cb_(completed_segments_.back());
         }
@@ -236,38 +247,67 @@ void Recorder::closeCurrentSegment() {
             pruneRollingBuffer();
         }
     }
+    else {
+        Logger::instance().warn(std::format(
+            "Recorder: segment {} discarded (empty)", path.string()
+        ));
+    }
     current_segment_.reset();
 }
 
 void Recorder::handlePackets(std::vector<EncodedPacket>& packets) {
     for (auto& packet : packets) {
         if (!current_segment_) break;
-        muxer_->write(packet);
+
+        if (rotate_pending_ && packet.type == EncodedStreamType::Video && packet.keyframe) {
+            Logger::instance().info("Recorder: rotating segment on keyframe");
+            closeCurrentSegment();
+            openNewSegment();
+            rotate_pending_ = false;
+            if (current_segment_) {
+                current_segment_->start_pts = packet.pts;
+            }
+        }
+
+        if (!muxer_->write(packet)) {
+            if (auto error = muxer_->lastError()) {
+                Logger::instance().error(std::format("Recorder: muxer write failed ({})", static_cast<int>(*error)));
+            } else {
+                Logger::instance().error("Recorder: muxer write failed");
+            }
+            continue;
+        }
+
         if (current_segment_->start_pts == 0) {
             current_segment_->start_pts = packet.pts;
         }
         current_segment_->last_pts = std::max(current_segment_->last_pts, packet.pts);
         if (packet.type == EncodedStreamType::Video && packet.keyframe) {
             current_segment_->last_keyframe_pts = packet.pts;
-            rotateIfNeeded(packet.pts, true);
-        } else {
-            rotateIfNeeded(packet.pts, false);
         }
+
+        rotateIfNeeded(packet.pts, packet.keyframe);
     }
 }
 
-void Recorder::rotateIfNeeded(int64_t pts_ms, bool keyframe) {
+void Recorder::rotateIfNeeded(int64_t pts_ms, bool /*keyframe*/) {
     if (!current_segment_) return;
-    auto elapsed = pts_ms - current_segment_->start_pts;
-    if (elapsed >= config_.segment_length.count() && keyframe) {
-        closeCurrentSegment();
-        openNewSegment();
-        if (current_segment_) {
-            current_segment_->start_pts = pts_ms;
-        }
+
+    const auto duration = pts_ms - current_segment_->start_pts;
+    const bool timeLimit = duration >= config_.segment_length.count();
+
+    std::error_code ec;
+    uint64_t size = 0;
+    if (std::filesystem::exists(current_segment_->path, ec))
+        size = std::filesystem::file_size(current_segment_->path, ec);
+
+    const bool sizeLimit = size >= config_.rolling_size_limit_bytes;
+
+    if ((timeLimit || sizeLimit) && !rotate_pending_) {
+        rotate_pending_ = true;
+        Logger::instance().debug("Recorder: rotation scheduled, waiting for next keyframe...");
     }
 }
-
 std::filesystem::path Recorder::buildSegmentPath(uint32_t index) const {
     std::filesystem::path base = session_directory_.empty() ? config_.buffer_directory : session_directory_;
     std::ostringstream oss;

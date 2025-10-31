@@ -1,10 +1,11 @@
 ﻿#include "muxer_avformat.h"
 
 #include <algorithm>
-#include <climits>
 #include <cctype>
+#include <climits>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <limits>
 #include <system_error>
 
@@ -88,7 +89,7 @@ MuxerAvFormat::~MuxerAvFormat() {
 }
 
 std::optional<MuxerError> MuxerAvFormat::lastError() const noexcept {
-    std::scoped_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     return last_error_;
 }
 
@@ -193,7 +194,7 @@ bool MuxerAvFormat::open(const MuxerConfig& cfg,
     if (!parent.empty()) {
         std::filesystem::create_directories(parent, ec);
         if (ec) {
-            Logger::instance().error("MuxerAvFormat: failed to create directories for " + parent.string() + ": " + ec.message());
+            Logger::instance().error(std::format("MuxerAvFormat: failed to create directories for {}: {}", parent.string(), ec.message()));
             setError(MuxerError::InvalidConfiguration);
             return false;
         }
@@ -301,7 +302,7 @@ bool MuxerAvFormat::createStream(const EncoderStreamInfo& info, int& index_out) 
 
     const AVCodec* codec = avcodec_find_encoder_by_name(info.codec_name.c_str());
     if (!codec) {
-        Logger::instance().warn("MuxerAvFormat: encoder " + info.codec_name + " not found, falling back to defaults");
+        Logger::instance().warn(std::format("MuxerAvFormat: encoder {} not found, falling back to defaults", info.codec_name));
         codec = avcodec_find_encoder(info.type == EncodedStreamType::Video ? AV_CODEC_ID_H264 : AV_CODEC_ID_AAC);
     }
 
@@ -324,23 +325,27 @@ bool MuxerAvFormat::createStream(const EncoderStreamInfo& info, int& index_out) 
     params->codec_id = codec ? codec->id : (info.type == EncodedStreamType::Video ? AV_CODEC_ID_H264 : AV_CODEC_ID_AAC);
 
     if (info.type == EncodedStreamType::Video) {
-        params->width = info.width;
-        params->height = info.height;
-        if (params->width <= 0 || params->height <= 0) {
-            Logger::instance().warn("MuxerAvFormat: invalid video dimensions " +std::to_string(params->width) + "x" + std::to_string(params->height));
+        params->width  = info.width > 0 ? info.width : 1920;
+        params->height = info.height > 0 ? info.height : 1080;
+        params->format = AV_PIX_FMT_YUV420P;
+
+        if (!info.extradata.empty()) {
+            params->extradata = (uint8_t*)av_mallocz(info.extradata.size() + AV_INPUT_BUFFER_PADDING_SIZE);
+            memcpy(params->extradata, info.extradata.data(), info.extradata.size());
+            params->extradata_size = (int)info.extradata.size();
+
+        } else if (!cached_video_extradata_.empty()) {
+            params->extradata = (uint8_t*)av_mallocz(cached_video_extradata_.size() + AV_INPUT_BUFFER_PADDING_SIZE);
+            memcpy(params->extradata, cached_video_extradata_.data(), cached_video_extradata_.size());
+            params->extradata_size = (int)cached_video_extradata_.size();
+
+            Logger::instance().info("MuxerAvFormat: reused cached SPS/PPS extradata for new segment");
         }
-    } else {
-        const int sample_rate = info.sample_rate > 0 ? info.sample_rate : 48000;
-        params->sample_rate = sample_rate;
-        bool layout_ok = true;
-        if (params->codec_id == AV_CODEC_ID_OPUS) {
-            layout_ok = setChannelsNoLayout(params, info.channels);
-        } else {
-            layout_ok = setDefaultLayout(params, info.channels);
-        }
-        if (!layout_ok) {
-            Logger::instance().warn("MuxerAvFormat: failed to configure channel layout for " + std::to_string(info.channels) + " channels");
-        }
+    }
+    else {
+        // audio
+        params->sample_rate = info.sample_rate > 0 ? info.sample_rate : 48000;
+        setDefaultLayout(params, info.channels > 0 ? info.channels : 2);
     }
 
     if (!info.extradata.empty()) {
@@ -416,6 +421,8 @@ void MuxerAvFormat::injectExtradataIfNeeded(const EncodedPacket& packet) const {
         if (params->extradata) {
             std::memcpy(params->extradata, extra.data(), extra.size());
             params->extradata_size = static_cast<int>(extra.size());
+
+            const_cast<MuxerAvFormat*>(this)->cached_video_extradata_ = extra;
             Logger::instance().info("MuxerAvFormat: injected SPS/PPS extradata from first video packet");
         }
     }
@@ -429,12 +436,14 @@ bool MuxerAvFormat::ensureHeader(const EncodedPacket& packet, AVStream* stream) 
         return false;
     }
 
-    // Ждем первый видео-пакет для создания заголовка (иначе FFmpeg не знает параметры)
-    if (packet.type != EncodedStreamType::Video) {
-        return true;
-    }
+    if (packet.type == EncodedStreamType::Video) {
+        injectExtradataIfNeeded(packet);
 
-    injectExtradataIfNeeded(packet);
+        if (stream->codecpar->extradata_size == 0) {
+            Logger::instance().warn("MuxerAvFormat: skipping header until SPS/PPS is available");
+            return true;
+        }
+    }
 
     for (unsigned int i = 0; i < ctx_->nb_streams; ++i) {
         AVStream* s = ctx_->streams[i];
@@ -450,6 +459,8 @@ bool MuxerAvFormat::ensureHeader(const EncodedPacket& packet, AVStream* stream) 
         }
     }
 
+
+
     int ret = avformat_write_header(ctx_.get(), nullptr);
     if (ret < 0) {
         logAvError(ret, "MuxerAvFormat: avformat_write_header");
@@ -457,6 +468,7 @@ bool MuxerAvFormat::ensureHeader(const EncodedPacket& packet, AVStream* stream) 
         setError(MuxerError::HeaderWriteFailed);
         return false;
     }
+
 
     header_written_ = true;
     Logger::instance().info("MuxerAvFormat: header written to " + output_path_.string());
@@ -627,7 +639,7 @@ bool MuxerAvFormat::close() {
 void MuxerAvFormat::logAvError(int err, const std::string& context) {
     char buf[256];
     av_strerror(err, buf, sizeof(buf));
-    Logger::instance().error("something went wrong in" + context + ": " + std::string(buf));
+    Logger::instance().error(std::format("MuxerAvFormat: {}: {}", context, buf));
 }
 
 std::string MuxerAvFormat::determineContainer(const MuxerConfig& cfg, const std::filesystem::path& outputPath) {

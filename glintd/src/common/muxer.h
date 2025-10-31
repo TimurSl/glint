@@ -39,4 +39,6 @@ public:
                       const EncoderStreamInfo& micAudio) = 0;
     virtual bool write(const EncodedPacket& packet) = 0;
     virtual bool close() = 0;
+
+    [[nodiscard]] virtual std::optional<MuxerError> lastError() const noexcept = 0;
 };

@@ -5,6 +5,7 @@
 #include <cctype>
 #include <iomanip>
 #include <sstream>
+#include <format>
 
 #include "buffer_merger.h"
 #include "db.h"
@@ -66,12 +67,13 @@ bool ReplayBuffer::start_session(const std::string& game) {
     if (recorder_) {
         recorder_->setRollingBufferEnabled(rolling_enabled_);
     }
-    current_session_id_ = DB::instance().createSession(game, now_ms(), options_.container);
-    if (current_session_id_ < 0) {
-        Logger::instance().error("ReplayBuffer: failed to create DB session");
+    auto sessionRes = DB::instance().createSession(game, now_ms(), options_.container);
+    if (!sessionRes) {
+        Logger::instance().error(std::format("ReplayBuffer: failed to create DB session: {}", sessionRes.error()));
         running_ = false;
         return false;
     }
+    current_session_id_ = static_cast<int>(sessionRes.value());
     session_directory_ = buildSessionDirectory(current_session_id_);
     if (recorder_) {
         recorder_->beginSession(current_session_id_, session_directory_);
@@ -85,6 +87,7 @@ void ReplayBuffer::stop_session() {
     std::vector<SegmentInfo> segments;
     std::filesystem::path sessionDir;
     std::string game;
+    bool rollingAtStop = true;
     {
         std::scoped_lock lock(mutex_);
         if (!running_) return;
@@ -93,38 +96,56 @@ void ReplayBuffer::stop_session() {
         segments = session_segments_;
         sessionDir = session_directory_;
         game = current_game_;
+        rollingAtStop = rolling_enabled_;
     }
 
     const int64_t stopped_at = now_ms();
+
+    std::vector<SegmentInfo> validSegments;
+    validSegments.reserve(segments.size());
+    for (const auto& seg : segments) {
+        if (seg.path.empty() || seg.end_ms <= seg.start_ms) {
+            continue;
+        }
+        std::error_code ec;
+        if (!std::filesystem::exists(seg.path, ec)) {
+            Logger::instance().warn(std::format("ReplayBuffer: missing segment {}", seg.path.string()));
+            continue;
+        }
+        validSegments.push_back(seg);
+    }
+
+    const bool hasSegments = !validSegments.empty();
+    const bool shouldMerge = hasSegments && !rollingAtStop;
+
     std::filesystem::path outputPath;
     bool merged = false;
-    if (sessionId >= 0 && !segments.empty()) {
+    if (shouldMerge && sessionId >= 0) {
         outputPath = buildOutputPath(game);
         BufferMerger merger(options_.temp_directory);
-        merged = merger.merge(sessionId, segments, outputPath);
-        if (!merged) {
+        merged = merger.merge(sessionId, validSegments, outputPath);
+        if (merged) {
+            Logger::instance().info(std::format("ReplayBuffer: merged session {} into {}", sessionId, outputPath.string()));
+        } else {
+            Logger::instance().warn(std::format("ReplayBuffer: merge failed for session {}", sessionId));
             outputPath.clear();
         }
+    } else if (sessionId >= 0 && !hasSegments) {
+        Logger::instance().warn(std::format("ReplayBuffer: no segments recorded for session {}", sessionId));
     }
 
     if (sessionId >= 0) {
-        DB::instance().finalizeSession(sessionId, stopped_at, merged ? outputPath.string() : std::string{});
-    }
-
-    if (merged) {
-        Logger::instance().info("ReplayBuffer: merged session " + std::to_string(sessionId) + " into " + outputPath.string());
-    } else if (sessionId >= 0) {
-        Logger::instance().warn("ReplayBuffer: merge failed for session " + std::to_string(sessionId));
-    }
-
-    if (merged) {
-        cleanupChunks(segments, sessionDir);
-    } else {
-        std::error_code ec;
-        if (!sessionDir.empty()) {
-            std::filesystem::remove_all(sessionDir, ec);
+        auto finalizeRes = DB::instance().finalizeSession(sessionId, stopped_at, merged ? outputPath.string() : std::string{});
+        if (!finalizeRes) {
+            Logger::instance().error(std::format("ReplayBuffer: failed to finalize session {}: {}", sessionId, finalizeRes.error()));
         }
     }
+
+    if (!shouldMerge && sessionId >= 0 && hasSegments) {
+        Logger::instance().info(std::format("ReplayBuffer: session {} ended with {} buffered segments", sessionId, validSegments.size()));
+    }
+
+    cleanupChunks(validSegments, sessionDir, merged && !rollingAtStop);
 
     {
         std::scoped_lock lock(mutex_);
@@ -145,10 +166,10 @@ bool ReplayBuffer::export_last_clip(const std::filesystem::path& path) {
     try {
         std::filesystem::create_directories(path.parent_path());
         std::filesystem::copy_file(last_output_path_, path, std::filesystem::copy_options::overwrite_existing);
-        Logger::instance().info("ReplayBuffer: exported clip to " + path.string());
+        Logger::instance().info(std::format("ReplayBuffer: exported clip to {}", path.string()));
         return true;
     } catch (const std::exception& ex) {
-        Logger::instance().error(std::string("ReplayBuffer: export failed: ") + ex.what());
+        Logger::instance().error(std::format("ReplayBuffer: export failed: {}", ex.what()));
         return false;
     }
 }
@@ -168,11 +189,18 @@ void ReplayBuffer::setRollingBufferEnabled(bool enabled) {
     }
 }
 
+
 void ReplayBuffer::onSegmentClosed(SegmentInfo& info) {
     std::scoped_lock lock(mutex_);
     if (current_session_id_ < 0) return;
     std::optional<int64_t> keyframe = info.keyframe_ms > 0 ? std::optional<int64_t>(info.keyframe_ms) : std::nullopt;
-    info.chunk_id = DB::instance().insertChunk(current_session_id_, info.path.string(), info.start_ms, info.end_ms, keyframe);
+    auto chunkRes = DB::instance().insertChunk(current_session_id_, info.path.string(), info.start_ms, info.end_ms, keyframe);
+    if (!chunkRes) {
+        info.chunk_id = -1;
+        Logger::instance().warn(std::format("ReplayBuffer: failed to record chunk {}: {}", info.path.string(), chunkRes.error()));
+    } else {
+        info.chunk_id = chunkRes.value();
+    }
     session_segments_.push_back(info);
 }
 
@@ -182,23 +210,37 @@ void ReplayBuffer::onSegmentRemoved(const SegmentInfo& info) {
                            [&](const SegmentInfo& seg) { return seg.path == info.path; });
     if (it != session_segments_.end()) {
         if (it->chunk_id >= 0) {
-            DB::instance().removeChunk(it->chunk_id);
+            if (auto res = DB::instance().removeChunk(it->chunk_id); !res) {
+                Logger::instance().warn(std::format("ReplayBuffer: failed to remove chunk {}: {}", it->chunk_id, res.error()));
+            }
         }
         session_segments_.erase(it);
     }
 }
 
-void ReplayBuffer::cleanupChunks(const std::vector<SegmentInfo>& segments, const std::filesystem::path& directory) {
+void ReplayBuffer::cleanupChunks(const std::vector<SegmentInfo>& segments,
+                                 const std::filesystem::path& directory,
+                                 bool deleteFiles) {
     for (const auto& seg : segments) {
         if (seg.chunk_id >= 0) {
-            DB::instance().removeChunk(seg.chunk_id);
+            if (auto res = DB::instance().removeChunk(seg.chunk_id); !res) {
+                Logger::instance().warn(std::format("ReplayBuffer: failed to remove chunk {}: {}", seg.chunk_id, res.error()));
+            }
         }
-        std::error_code ec;
-        std::filesystem::remove(seg.path, ec);
+        if (deleteFiles) {
+            std::error_code ec;
+            std::filesystem::remove(seg.path, ec);
+            if (ec) {
+                Logger::instance().warn(std::format("ReplayBuffer: failed to remove {}: {}", seg.path.string(), ec.message()));
+            }
+        }
     }
-    std::error_code ec;
-    if (!directory.empty()) {
+    if (deleteFiles && !directory.empty()) {
+        std::error_code ec;
         std::filesystem::remove_all(directory, ec);
+        if (ec) {
+            Logger::instance().warn(std::format("ReplayBuffer: failed to remove directory {}: {}", directory.string(), ec.message()));
+        }
     }
 }
 

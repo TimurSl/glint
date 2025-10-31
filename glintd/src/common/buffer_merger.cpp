@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -30,11 +31,12 @@ std::string escapePath(const std::filesystem::path& path) {
 bool BufferMerger::writeConcatFile(const std::vector<SegmentInfo>& segments, const std::filesystem::path& listPath) const {
     std::ofstream list(listPath, std::ios::trunc);
     if (!list.is_open()) {
-        Logger::instance().error("BufferMerger: failed to open concat list " + listPath.string());
+        Logger::instance().error(std::format("BufferMerger: failed to open concat list {}", listPath.string()));
         return false;
     }
     for (const auto& seg : segments) {
-        list << "file '" << escapePath(seg.path) << "'\n";
+        auto absPath = std::filesystem::absolute(seg.path);
+        list << "file '" << escapePath(absPath) << "'\n";
     }
     return true;
 }
@@ -48,7 +50,7 @@ bool BufferMerger::merge(int sessionId, const std::vector<SegmentInfo>& segments
     std::error_code ec;
     std::filesystem::create_directories(temp_directory_, ec);
     if (ec) {
-        Logger::instance().error("BufferMerger: failed to create temp directory: " + ec.message());
+        Logger::instance().error(std::format("BufferMerger: failed to create temp directory: {}", ec.message()));
         return false;
     }
 
@@ -59,7 +61,7 @@ bool BufferMerger::merge(int sessionId, const std::vector<SegmentInfo>& segments
 
     std::filesystem::create_directories(outputPath.parent_path(), ec);
     if (ec) {
-        Logger::instance().error("BufferMerger: failed to create output directory: " + ec.message());
+        Logger::instance().error(std::format("BufferMerger: failed to create output directory: {}", ec.message()));
         std::filesystem::remove(listPath);
         return false;
     }
@@ -70,11 +72,11 @@ bool BufferMerger::merge(int sessionId, const std::vector<SegmentInfo>& segments
         << " -map 0 -c copy "
         << '"' << outputPath.string() << '"';
 
-    Logger::instance().info("BufferMerger: executing " + cmd.str());
+    Logger::instance().info(std::format("BufferMerger: executing {}", cmd.str()));
     int result = std::system(cmd.str().c_str());
     std::filesystem::remove(listPath, ec);
     if (result != 0) {
-        Logger::instance().error("BufferMerger: ffmpeg returned code " + std::to_string(result));
+        Logger::instance().error(std::format("BufferMerger: ffmpeg returned code {}", result));
         return false;
     }
     return true;
